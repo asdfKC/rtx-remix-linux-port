@@ -173,3 +173,20 @@ public source; DXVK `include/native` headers; headless runtime with `skipVulkanS
    DLSS-NR compiled out via `REMIX_NO_DLSSNR`, because its headers are only in the Windows NGX package.
    GCC conformance fixes for code MSVC accepted. `src/dxvk/dxvk_device.cpp` passes a syntax check.
    A full syntax sweep of `src/dxvk` is next: 74 of 173 files failing at last count.
+9. **`src/dxvk`: 167 of 169 files pass a syntax check** (GCC 13, `-fsyntax-only` with the PCH).
+   New Linux pieces:
+   - FD-based interop export and import (`VK_KHR_external_memory_fd` / `_semaphore_fd`).
+   - Headless ImGui platform backend.
+   - NRC/NVAPI stubs that return "unsupported".
+   - No-op Reflex and file watch.
+   - DDS loading through `mmap`.
+   - `libNRD.so` loaded with `dlopen`.
+
+   Two real bugs found along the way:
+   - Ray tracing extensions were gated on `_WIN64`, so a Linux build would have had no
+     `VK_KHR_acceleration_structure` or `VK_KHR_ray_query`.
+   - Without RTX IO, the async texture loader was never started.
+10. Interface notes for Phase C:
+    - Remix's ImGui menus get input from Win32 messages. On Linux the mod must forward input.
+    - `Startup` sizes the device from `GetClientRect(hwnd)`. On Linux that is a client size the
+      mod reports (`remix_linux::setHeadlessClientSize`).

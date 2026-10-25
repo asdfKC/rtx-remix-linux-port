@@ -1,7 +1,7 @@
 From b9005a5c80c04f37079c2dd9c227ce1363972133 Mon Sep 17 00:00:00 2001
 From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
 Date: Sun, 25 Oct 2026 22:14:37 +0000
-Subject: [PATCH 2/3] linux: case-correct NRC include paths, keep-going shader
+Subject: [PATCH 2/4] linux: case-correct NRC include paths, keep-going shader
  builds
 
 NRC's submodule directory and files are 'Include', 'Nrc.hlsli' and
