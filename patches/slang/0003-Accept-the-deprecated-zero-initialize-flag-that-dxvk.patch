@@ -1,0 +1,27 @@
+From aacc4d7294ca1c0ae0910fbc0b219e0ced7452f9 Mon Sep 17 00:00:00 2001
+From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
+Date: Sun, 25 Oct 2026 22:10:49 +0000
+Subject: [PATCH 3/3] Accept the deprecated -zero-initialize flag that
+ dxvk-remix passes
+
+Signed-off-by: Claude (for Kush) <kushisthecoolest@gmail.com>
+---
+ source/slang/slang-options.cpp | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/source/slang/slang-options.cpp b/source/slang/slang-options.cpp
+index 68f538508..6378ae34c 100644
+--- a/source/slang/slang-options.cpp
++++ b/source/slang/slang-options.cpp
+@@ -2184,6 +2184,8 @@ SlangResult OptionsParser::_parse(int argc, char const* const* argv)
+         case OptionKind::TrackLiveness:
+         case OptionKind::SkipCodeGen:
+         case OptionKind::ParameterBlocksUseRegisterSpaces:
++        // REMIX-LINUX: Accept the deprecated -zero-initialize flag that dxvk-remix passes.
++        case OptionKind::ZeroInitialize:
+         case OptionKind::ValidateIr:
+         case OptionKind::DumpIr:
+         case OptionKind::VulkanInvertY:
+-- 
+2.43.0
+

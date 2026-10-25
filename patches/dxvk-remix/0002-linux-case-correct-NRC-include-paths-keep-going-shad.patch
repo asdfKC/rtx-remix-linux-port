@@ -1,0 +1,110 @@
+From b9005a5c80c04f37079c2dd9c227ce1363972133 Mon Sep 17 00:00:00 2001
+From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
+Date: Sun, 25 Oct 2026 22:14:37 +0000
+Subject: [PATCH 2/2] linux: case-correct NRC include paths, keep-going shader
+ builds
+
+NRC's submodule directory and files are 'Include', 'Nrc.hlsli' and
+'NrcHelpers.hlsli'. Windows resolves the old spellings case-insensitively,
+Linux does not. REMIX_SHADERS_KEEP_GOING=1 makes compile_shaders.py build
+every shader and report all failures.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Tb41TgDi74v7sgH5LJBZ5A
+Signed-off-by: Claude (for Kush) <kushisthecoolest@gmail.com>
+---
+ scripts-common/compile_shaders.py                      | 10 ++++++++--
+ src/dxvk/shaders/rtx/external/NRC.slangh               |  2 +-
+ src/dxvk/shaders/rtx/pass/nrc/nrc_resolve.comp.slang   |  2 +-
+ .../shaders/rtx/pass/nrc/nrc_resolve_binding_indices.h |  2 +-
+ src/dxvk/shaders/rtx/pass/nrc_args.h                   |  2 +-
+ 5 files changed, 12 insertions(+), 6 deletions(-)
+
+diff --git a/scripts-common/compile_shaders.py b/scripts-common/compile_shaders.py
+index 5b024f0..f9a9d52 100644
+--- a/scripts-common/compile_shaders.py
++++ b/scripts-common/compile_shaders.py
+@@ -15,6 +15,9 @@ import depfile
+ report_lock = threading.Lock()
+ task_lock = threading.Lock()
+ terminate = False
++# Set REMIX_SHADERS_KEEP_GOING=1 to compile every shader and report all failures at the end.
++keepGoing = os.environ.get('REMIX_SHADERS_KEEP_GOING') == '1'
++anyFailed = False
+ 
+ def sigint_handler(signal, frame):
+     global terminate
+@@ -187,7 +190,10 @@ def runTasks(tasks):
+             break
+ 
+         if exitCode != 0:
+-            terminate = True
++            global anyFailed
++            anyFailed = True
++            if not keepGoing:
++                terminate = True
+ 
+ def getShaderName(inputFile):
+     return os.path.splitext(os.path.basename(inputFile))[0]
+@@ -649,5 +655,5 @@ if len(tasks):
+     for thread in threads:
+         thread.join()
+ 
+-if terminate:
++if terminate or anyFailed:
+     sys.exit(1)
+diff --git a/src/dxvk/shaders/rtx/external/NRC.slangh b/src/dxvk/shaders/rtx/external/NRC.slangh
+index a9df811..be1c5d8 100644
+--- a/src/dxvk/shaders/rtx/external/NRC.slangh
++++ b/src/dxvk/shaders/rtx/external/NRC.slangh
+@@ -35,7 +35,7 @@
+ #include "rtx/external/NRC.h"
+ #include "rtx/pass/nrc_args.h"
+ 
+-#include "nrc/include/NRC.hlsli"
++#include "nrc/Include/Nrc.hlsli"
+ 
+ // Evaluates an expression only when NRC is enabled and returns its output
+ // Returns true when NRC is disabled
+diff --git a/src/dxvk/shaders/rtx/pass/nrc/nrc_resolve.comp.slang b/src/dxvk/shaders/rtx/pass/nrc/nrc_resolve.comp.slang
+index f9551fd..4000136 100644
+--- a/src/dxvk/shaders/rtx/pass/nrc/nrc_resolve.comp.slang
++++ b/src/dxvk/shaders/rtx/pass/nrc/nrc_resolve.comp.slang
+@@ -25,7 +25,7 @@
+ 
+ #define ENABLE_NRC 1  // Needed to access global values guarded by the define
+ #include "rtx/external/NRC.slangh"
+-#include "nrc/include/NRCHelpers.hlsli"
++#include "nrc/Include/NrcHelpers.hlsli"
+ #include "rtx/utility/geometry_flags.slangh"
+ #include "rtx/concept/ray/ray_helper.slangh"
+ #include "rtx/pass/raytrace_args.h"
+diff --git a/src/dxvk/shaders/rtx/pass/nrc/nrc_resolve_binding_indices.h b/src/dxvk/shaders/rtx/pass/nrc/nrc_resolve_binding_indices.h
+index 6f9e90c..3498bee 100644
+--- a/src/dxvk/shaders/rtx/pass/nrc/nrc_resolve_binding_indices.h
++++ b/src/dxvk/shaders/rtx/pass/nrc/nrc_resolve_binding_indices.h
+@@ -22,7 +22,7 @@
+ #pragma once
+ 
+ #include "rtx/external/NRC.h"
+-#include "nrc/include/NrcStructures.h"
++#include "nrc/Include/NrcStructures.h"
+ 
+ // Thread group dimensions for NRC resolve dispatch
+ #define NRC_RESOLVE_THREADS_DISPATCH_WIDTH  16
+diff --git a/src/dxvk/shaders/rtx/pass/nrc_args.h b/src/dxvk/shaders/rtx/pass/nrc_args.h
+index 27dec58..3691791 100644
+--- a/src/dxvk/shaders/rtx/pass/nrc_args.h
++++ b/src/dxvk/shaders/rtx/pass/nrc_args.h
+@@ -24,7 +24,7 @@
+ #include "rtx/utility/shader_types.h"
+ #include "rtx/external/NRC.h"
+ // WAR: Specify a relative path to this file since a file including this file doesn't resolve a relative path to global include paths specified in meson
+-#include "../../../../../submodules/nrc/include/NrcStructures.h"
++#include "../../../../../submodules/nrc/Include/NrcStructures.h"
+ #include "../shaders/rtx/concept/surface/surface_shared.h"
+ 
+ // A training query reservoir entry holds the selection key in the high bits and the winning pixel's offset
+-- 
+2.43.0
+

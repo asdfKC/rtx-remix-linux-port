@@ -1,0 +1,152 @@
+From 466a1cc8ea10bc02a08f40bc9efcbfcad8926206 Mon Sep 17 00:00:00 2001
+From: Jerran Schmidt <jerranschmidt@gmail.com>
+Date: Tue, 17 Jun 2025 13:49:02 +1000
+Subject: [PATCH 1/3] Fix for missing signedness cast in SwizzleIR (#7448)
+
+* Cast if there is a signedness mismatch on the swizzle
+
+* Move isSignedType to slang-util and add test
+
+---------
+
+Co-authored-by: Yong He <yonghe@outlook.com>
+(cherry picked from commit 60a8f1fc3eee37977ee891661f65916f66aef364)
+---
+ source/slang/slang-emit-spirv.cpp         | 21 ------------------
+ source/slang/slang-ir-util.cpp            | 21 ++++++++++++++++++
+ source/slang/slang-ir-util.h              |  2 ++
+ source/slang/slang-lower-to-ir.cpp        |  8 +++++++
+ tests/spirv/swizzle-signed-typecast.slang | 26 +++++++++++++++++++++++
+ 5 files changed, 57 insertions(+), 21 deletions(-)
+ create mode 100644 tests/spirv/swizzle-signed-typecast.slang
+
+diff --git a/source/slang/slang-emit-spirv.cpp b/source/slang/slang-emit-spirv.cpp
+index ec9857ecf..8e8e7327b 100644
+--- a/source/slang/slang-emit-spirv.cpp
++++ b/source/slang/slang-emit-spirv.cpp
+@@ -7763,27 +7763,6 @@ struct SPIRVEmitContext : public SourceEmitterBase, public SPIRVEmitSharedContex
+             List<IRInst*>::makeRepeated(scalar, Index(numElems)));
+     }
+ 
+-    bool isSignedType(IRType* type)
+-    {
+-        switch (type->getOp())
+-        {
+-        case kIROp_FloatType:
+-        case kIROp_DoubleType:
+-            return true;
+-        case kIROp_IntType:
+-        case kIROp_Int16Type:
+-        case kIROp_Int64Type:
+-        case kIROp_Int8Type:
+-            return true;
+-        case kIROp_VectorType:
+-            return isSignedType(as<IRVectorType>(type)->getElementType());
+-        case kIROp_MatrixType:
+-            return isSignedType(as<IRMatrixType>(type)->getElementType());
+-        default:
+-            return false;
+-        }
+-    }
+-
+     bool isFloatType(IRInst* type)
+     {
+         switch (type->getOp())
+diff --git a/source/slang/slang-ir-util.cpp b/source/slang/slang-ir-util.cpp
+index 13742711c..a2ec15661 100644
+--- a/source/slang/slang-ir-util.cpp
++++ b/source/slang/slang-ir-util.cpp
+@@ -2348,4 +2348,25 @@ bool isInstHoistable(IROp op, IRType* type, IRInst* const* fixedArgs)
+            isSpecConstOpHoistable(op, type, fixedArgs);
+ }
+ 
++bool isSignedType(IRType* type)
++{
++    switch (type->getOp())
++    {
++    case kIROp_FloatType:
++    case kIROp_DoubleType:
++        return true;
++    case kIROp_IntType:
++    case kIROp_Int16Type:
++    case kIROp_Int64Type:
++    case kIROp_Int8Type:
++        return true;
++    case kIROp_VectorType:
++        return isSignedType(as<IRVectorType>(type)->getElementType());
++    case kIROp_MatrixType:
++        return isSignedType(as<IRMatrixType>(type)->getElementType());
++    default:
++        return false;
++    }
++}
++
+ } // namespace Slang
+diff --git a/source/slang/slang-ir-util.h b/source/slang/slang-ir-util.h
+index cccec7e05..dccdf5457 100644
+--- a/source/slang/slang-ir-util.h
++++ b/source/slang/slang-ir-util.h
+@@ -417,6 +417,8 @@ constexpr bool anyOf(Range&& range, Predicate&& pred)
+     }
+     return false;
+ }
++
++bool isSignedType(IRType* type);
+ } // namespace Slang
+ 
+ #endif
+diff --git a/source/slang/slang-lower-to-ir.cpp b/source/slang/slang-lower-to-ir.cpp
+index 596a091d4..bda8cbaa1 100644
+--- a/source/slang/slang-lower-to-ir.cpp
++++ b/source/slang/slang-lower-to-ir.cpp
+@@ -7834,6 +7834,14 @@ top:
+                     // we simply form a pointer to each of the vector
+                     // elements and write to them individually.
+                     IRInst* irRightVal = getSimpleVal(context, right);
++
++                    // If there is a mismatch between the signedness of the left and rigth values
++                    // then emit a cast
++                    if (isSignedType(swizzleInfo->type) != isSignedType(irRightVal->getDataType()))
++                    {
++                        irRightVal = builder->emitCast(swizzleInfo->type, irRightVal);
++                    }
++
+                     swizzledStore(
+                         loweredBase.val,
+                         irRightVal,
+diff --git a/tests/spirv/swizzle-signed-typecast.slang b/tests/spirv/swizzle-signed-typecast.slang
+new file mode 100644
+index 000000000..459dd3860
+--- /dev/null
++++ b/tests/spirv/swizzle-signed-typecast.slang
+@@ -0,0 +1,26 @@
++//TEST:SIMPLE(filecheck=CHECK): -target spirv
++
++// CHECK: %{{.*}} = OpBitcast %v2uint %{{.*}}
++
++RWTexture2D<uint3> tex;
++void fn(inout int2 origPos, uint offset)
++{
++  origPos.x += offset;
++  origPos.y += offset;
++}
++
++uint3 id(float3 coord)
++{
++  return uint3(coord);
++}
++
++[shader("compute")]
++[numthreads(1,1,1)]
++void main(uint3 threadId : SV_DispatchThreadID)
++{
++    uint3 index = id(threadId);
++    // Passing a uint3 swizzle as a parameter to a function expecting a int2 should result
++    // in an explicit typecast from unsigned to signed
++    fn(index.xy, 1);
++    tex[threadId.xy] = index;
++}
+\ No newline at end of file
+-- 
+2.43.0
+

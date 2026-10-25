@@ -1,0 +1,142 @@
+From 9f4fc20ec50fd5a050edefa0684b05604897917d Mon Sep 17 00:00:00 2001
+From: Jerran Schmidt <jerrans@nvidia.com>
+Date: Fri, 27 Jun 2025 02:33:16 +1000
+Subject: [PATCH 2/3] Fix for OpUConvert producing invalid opcode when to/from
+ signs differ (#7398)
+
+* Fix for OpUConvert outputting scalar type for mixed sign vector type conversions
+
+* Fix compiler warning
+
+* Added regression test for UConvert vector fix
+
+* Formatting
+
+* getUnsignedType helper
+
+* Formatting
+
+* Fix for addtional int types
+
+* Helper function to convert signed type to unsigned type
+
+(cherry picked from commit 83c7b7c7716c31596d9e2829d4afa708ce23a182)
+---
+ source/slang/slang-emit-spirv.cpp           |  8 ++---
+ source/slang/slang-ir-util.cpp              | 39 +++++++++++++++++++++
+ source/slang/slang-ir-util.h                |  2 ++
+ tests/spirv/uconvert-vector-typecheck.slang | 20 +++++++++++
+ 4 files changed, 64 insertions(+), 5 deletions(-)
+ create mode 100644 tests/spirv/uconvert-vector-typecheck.slang
+
+diff --git a/source/slang/slang-emit-spirv.cpp b/source/slang/slang-emit-spirv.cpp
+index 8e8e7327b..65b8eabaf 100644
+--- a/source/slang/slang-emit-spirv.cpp
++++ b/source/slang/slang-emit-spirv.cpp
+@@ -7300,11 +7300,9 @@ struct SPIRVEmitContext : public SourceEmitterBase, public SPIRVEmitSharedContex
+             // Perform unsigned conversion first to an unsigned integer of the same width as the
+             // result then perform bit cast to the signed result type. This is done because SPIRV's
+             // unsigned conversion (`OpUConvert`) requires result type to be unsigned.
+-            auto unsignedV = emitOpUConvert(
+-                parent,
+-                nullptr,
+-                builder.getType(getOppositeSignIntTypeOp(toType->getOp())),
+-                inst->getOperand(0));
++            auto builderType = getUnsignedTypeFromSignedType(&builder, toTypeV);
++
++            auto unsignedV = emitOpUConvert(parent, nullptr, builderType, inst->getOperand(0));
+             return emitOpBitcast(parent, inst, toTypeV, unsignedV);
+         }
+         else if (fromInfo.isSigned)
+diff --git a/source/slang/slang-ir-util.cpp b/source/slang/slang-ir-util.cpp
+index a2ec15661..497281114 100644
+--- a/source/slang/slang-ir-util.cpp
++++ b/source/slang/slang-ir-util.cpp
+@@ -2348,6 +2348,45 @@ bool isInstHoistable(IROp op, IRType* type, IRInst* const* fixedArgs)
+            isSpecConstOpHoistable(op, type, fixedArgs);
+ }
+ 
++IRType* getUnsignedTypeFromSignedType(IRBuilder* builder, IRType* type)
++{
++    SLANG_RELEASE_ASSERT(isSignedType(type));
++
++    auto elementType = getVectorOrCoopMatrixElementType(type);
++
++    IROp op = type->getOp();
++    switch (op)
++    {
++    case kIROp_MatrixType:
++        {
++            auto unsignedTypeOp = getOppositeSignIntTypeOp(elementType->getOp());
++            auto matType = as<IRMatrixType>(type);
++            SLANG_RELEASE_ASSERT(matType);
++            return builder->getMatrixType(
++                builder->getType(unsignedTypeOp),
++                matType->getRowCount(),
++                matType->getColumnCount(),
++                matType->getLayout());
++        }
++    case kIROp_VectorType:
++        {
++            auto unsignedTypeOp = getOppositeSignIntTypeOp(elementType->getOp());
++            auto vecType = as<IRVectorType>(type);
++            SLANG_RELEASE_ASSERT(vecType);
++            return builder->getVectorType(
++                builder->getType(unsignedTypeOp),
++                vecType->getElementCount());
++        }
++    case kIROp_IntType:
++    case kIROp_Int16Type:
++    case kIROp_Int64Type:
++    case kIROp_Int8Type:
++        return builder->getType(getOppositeSignIntTypeOp(elementType->getOp()));
++    default:
++        return type;
++    }
++}
++
+ bool isSignedType(IRType* type)
+ {
+     switch (type->getOp())
+diff --git a/source/slang/slang-ir-util.h b/source/slang/slang-ir-util.h
+index dccdf5457..edb8fdf09 100644
+--- a/source/slang/slang-ir-util.h
++++ b/source/slang/slang-ir-util.h
+@@ -418,6 +418,8 @@ constexpr bool anyOf(Range&& range, Predicate&& pred)
+     return false;
+ }
+ 
++IRType* getUnsignedTypeFromSignedType(IRBuilder* builder, IRType* type);
++
+ bool isSignedType(IRType* type);
+ } // namespace Slang
+ 
+diff --git a/tests/spirv/uconvert-vector-typecheck.slang b/tests/spirv/uconvert-vector-typecheck.slang
+new file mode 100644
+index 000000000..f4671c89f
+--- /dev/null
++++ b/tests/spirv/uconvert-vector-typecheck.slang
+@@ -0,0 +1,20 @@
++//TEST:SIMPLE(filecheck=CHECK): -target spirv
++
++// CHECK: %[[PTR:[0-9a-zA-Z_]+]] = OpVectorShuffle %v2uint %{{.*}} %{{.*}} 0 1
++// CHECK: %{{.*}} = OpUConvert %v2ushort %[[PTR]]
++
++RWTexture2D<uint> tex;
++
++void writeFlags(int2 position, RWTexture2D<uint> flagsTexture, uint flags)
++{
++    flagsTexture[position] = flags;
++}
++
++[shader("compute")]
++[numthreads(1,1,1)]
++void main(uint3 threadId : SV_DispatchThreadID)
++{
++    uint16_t2 position = uint16_t2(threadId.xy);
++    uint flags = 1;
++    writeFlags(position, tex, flags);
++}
+-- 
+2.43.0
+
