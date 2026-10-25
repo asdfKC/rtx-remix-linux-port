@@ -1,0 +1,516 @@
+From 494cbc2aa3ca7076abf7067114e42dcad31dd93c Mon Sep 17 00:00:00 2001
+From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
+Date: Sun, 25 Oct 2026 23:12:58 +0000
+Subject: [PATCH 5/5] linux: d3d9 window/cursor shims, headless window
+ procedure, misc GCC fixes
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Tb41TgDi74v7sgH5LJBZ5A
+Signed-off-by: Claude (for Kush) <kushisthecoolest@gmail.com>
+---
+ linux/include/remix_linux_compat.h          | 170 ++++++++++++++++++++
+ linux/src/imgui_impl_linux.cpp              |   3 +
+ src/d3d9/d3d9_common_texture.cpp            |   7 +
+ src/d3d9/d3d9_cursor.cpp                    |  11 ++
+ src/d3d9/d3d9_device.cpp                    |   4 +
+ src/d3d9/d3d9_fixed_function.cpp            |   2 +-
+ src/d3d9/d3d9_rtx.cpp                       |   2 +-
+ src/d3d9/d3d9_rtx_geometry.cpp              |  10 +-
+ src/d3d9/d3d9_shader.cpp                    |   6 +-
+ src/d3d9/d3d9_swapchain.cpp                 |  15 ++
+ src/dxso/dxso_compiler.cpp                  |   4 +-
+ src/dxvk/rtx_render/rtx_debug_view.h        |   6 +-
+ src/dxvk/rtx_render/rtx_dlfg.h              |   2 +-
+ src/dxvk/rtx_render/rtx_remix_api.cpp       |   2 +-
+ src/dxvk/rtx_render/rtx_texture_manager.cpp |  20 +++
+ 15 files changed, 251 insertions(+), 13 deletions(-)
+
+diff --git a/linux/include/remix_linux_compat.h b/linux/include/remix_linux_compat.h
+index 8e47caa..4caa926 100644
+--- a/linux/include/remix_linux_compat.h
++++ b/linux/include/remix_linux_compat.h
+@@ -316,6 +316,7 @@ typedef struct _devicemodeW {
+   DWORD dmDisplayFrequency;
+ } DEVMODEW, *PDEVMODEW, *LPDEVMODEW;
+ 
++#define DM_INTERLACED       0x00000002
+ #define DM_BITSPERPEL       0x00040000
+ #define DM_PELSWIDTH        0x00080000
+ #define DM_PELSHEIGHT       0x00100000
+@@ -741,3 +742,172 @@ inline HANDLE CreateEventA(void*, BOOL, BOOL, const char*) {
+ inline DWORD WaitForSingleObject(HANDLE, DWORD) {
+   return WAIT_FAILED;
+ }
++
++// Display enumeration reports a single primary display, which the D3D9 adapter list expects to exist.
++#define DISPLAY_DEVICE_ATTACHED_TO_DESKTOP 0x00000001
++#define DISPLAY_DEVICE_MIRRORING_DRIVER    0x00000008
++#define DISPLAY_DEVICE_PRIMARY_DEVICE      0x00000004
++typedef struct _DISPLAY_DEVICEA {
++  DWORD cb;
++  CHAR  DeviceName[32];
++  CHAR  DeviceString[128];
++  DWORD StateFlags;
++  CHAR  DeviceID[128];
++  CHAR  DeviceKey[128];
++} DISPLAY_DEVICEA, *PDISPLAY_DEVICEA;
++
++inline BOOL EnumDisplayDevicesA(const char*, DWORD index, DISPLAY_DEVICEA* device, DWORD) {
++  if (device == nullptr || index != 0) {
++    return FALSE;
++  }
++  const DWORD cb = device->cb;
++  std::memset(device, 0, sizeof(*device));
++  device->cb = cb;
++  std::snprintf(device->DeviceName, sizeof(device->DeviceName), "\\\\.\\DISPLAY1");
++  std::snprintf(device->DeviceString, sizeof(device->DeviceString), "Headless display");
++  device->StateFlags = DISPLAY_DEVICE_ATTACHED_TO_DESKTOP | DISPLAY_DEVICE_PRIMARY_DEVICE;
++  return TRUE;
++}
++
++// Cursor and GDI device-context functions. The headless runtime has neither.
++inline BOOL GetCursorPos(POINT* pt) {
++  if (pt) {
++    *pt = POINT { 0, 0 };
++  }
++  return TRUE;
++}
++
++inline BOOL SetCursorPos(int, int) {
++  return TRUE;
++}
++
++inline HCURSOR SetCursor(HCURSOR) {
++  return nullptr;
++}
++
++inline HDC CreateCompatibleDC(HDC) {
++  return nullptr;
++}
++
++inline BOOL DeleteDC(HDC) {
++  return TRUE;
++}
++
++// Only the null handles returned by the event stubs above reach this. FD-backed handles are closed explicitly with close().
++inline BOOL CloseHandle(HANDLE handle) {
++  return handle == nullptr || handle == INVALID_HANDLE_VALUE;
++}
++
++// Window management. The headless runtime's window handle is only a token, so placement and style
++// changes do nothing, and geometry queries report the client size the API has set.
++#define GWL_STYLE   (-16)
++#define GWL_EXSTYLE (-20)
++#define WS_VISIBLE             0x10000000L
++#define WS_OVERLAPPEDWINDOW    0x00CF0000L
++#define WS_EX_TOPMOST          0x00000008L
++#define WS_EX_OVERLAPPEDWINDOW 0x00000300L
++#define SWP_NOSIZE         0x0001
++#define SWP_NOMOVE         0x0002
++#define SWP_NOZORDER       0x0004
++#define SWP_NOACTIVATE     0x0010
++#define SWP_FRAMECHANGED   0x0020
++#define SWP_SHOWWINDOW     0x0040
++#define SWP_ASYNCWINDOWPOS 0x4000
++#define HWND_TOP       ((HWND)0)
++#define HWND_DESKTOP   ((HWND)0)
++#define HWND_TOPMOST   ((HWND)-1)
++#define HWND_NOTOPMOST ((HWND)-2)
++#define SM_CXSCREEN 0
++#define SM_CYSCREEN 1
++#define WM_NULL           0x0000
++#define WM_DESTROY        0x0002
++#define WM_SIZE           0x0005
++#define WM_ACTIVATE       0x0006
++#define WM_SETFOCUS       0x0007
++#define WM_KILLFOCUS      0x0008
++#define WM_ACTIVATEAPP    0x001C
++#define WM_ENDSESSION     0x0016
++#define WM_WINDOWPOSCHANGING 0x0046
++#define WM_WINDOWPOSCHANGED  0x0047
++#define WM_NCCALCSIZE     0x0083
++#define WM_NCDESTROY      0x0082
++#define WM_ENTERMENULOOP  0x0211
++#define WM_EXITMENULOOP   0x0212
++#define WA_INACTIVE    0
++#define SIZE_RESTORED  0
++#define SIZE_MINIMIZED 1
++
++inline BOOL IsWindow(HWND window) {
++  return window != nullptr;
++}
++
++inline HWND GetParent(HWND) {
++  return nullptr;
++}
++
++inline LONG GetWindowLongA(HWND, int) {
++  return WS_VISIBLE;
++}
++
++inline LONG GetWindowLongW(HWND window, int index) {
++  return GetWindowLongA(window, index);
++}
++
++inline LONG SetWindowLongA(HWND, int, LONG) {
++  return 0;
++}
++
++inline LONG SetWindowLongW(HWND window, int index, LONG value) {
++  return SetWindowLongA(window, index, value);
++}
++
++#define GetWindowLong GetWindowLongA
++#define SetWindowLong SetWindowLongA
++
++inline BOOL SetWindowPos(HWND, HWND, int, int, int, int, UINT) {
++  return TRUE;
++}
++
++inline BOOL GetWindowRect(HWND window, RECT* rect) {
++  return GetClientRect(window, rect);
++}
++
++inline int MapWindowPoints(HWND, HWND, POINT*, UINT) {
++  return 0;
++}
++
++inline BOOL SetRect(RECT* rect, int left, int top, int right, int bottom) {
++  if (rect == nullptr) {
++    return FALSE;
++  }
++  rect->left = left;
++  rect->top = top;
++  rect->right = right;
++  rect->bottom = bottom;
++  return TRUE;
++}
++
++inline BOOL OffsetRect(RECT* rect, int dx, int dy) {
++  if (rect == nullptr) {
++    return FALSE;
++  }
++  rect->left += dx;
++  rect->right += dx;
++  rect->top += dy;
++  rect->bottom += dy;
++  return TRUE;
++}
++
++inline BOOL AdjustWindowRectEx(RECT*, DWORD, BOOL, DWORD) {
++  return TRUE;
++}
++
++inline int GetSystemMetrics(int index) {
++  RECT rect = {};
++  GetClientRect(nullptr, &rect);
++  return index == SM_CXSCREEN ? rect.right : index == SM_CYSCREEN ? rect.bottom : 0;
++}
++
++inline BOOL PostMessageW(HWND, UINT, WPARAM, LPARAM) {
++  return FALSE;
++}
+diff --git a/linux/src/imgui_impl_linux.cpp b/linux/src/imgui_impl_linux.cpp
+index 246e3d1..7f28806 100644
+--- a/linux/src/imgui_impl_linux.cpp
++++ b/linux/src/imgui_impl_linux.cpp
+@@ -72,6 +72,9 @@ float ImGui_ImplWin32_GetDpiScaleForMonitor(void*) {
+ 
+ void ImGui_ImplWin32_EnableAlphaCompositing(void*) { }
+ 
++// There is no Win32 virtual key for the keypad enter key, so imgui_impl_win32.cpp defines one.
++#define IM_VK_KEYPAD_ENTER (VK_RETURN + 256)
++
+ ImGuiKey ImGui_ImplWin32_VirtualKeyToImGuiKey(WPARAM wParam)
+ {
+     switch (wParam)
+diff --git a/src/d3d9/d3d9_common_texture.cpp b/src/d3d9/d3d9_common_texture.cpp
+index 526e294..5a39137 100644
+--- a/src/d3d9/d3d9_common_texture.cpp
++++ b/src/d3d9/d3d9_common_texture.cpp
+@@ -561,8 +561,15 @@ namespace dxvk {
+       if (ntHandle == INVALID_HANDLE_VALUE || !setSharedMetadata(ntHandle, &metadata, sizeof(metadata)))
+         Logger::warn("D3D9: Failed to write shared resource info for a texture");
+ 
++      // NV-DXVK start: Shared images export opaque FDs on Linux
++#ifdef _WIN32
+       if (ntHandle != INVALID_HANDLE_VALUE)
+         ::CloseHandle(ntHandle);
++#else
++      if (ntHandle != INVALID_HANDLE_VALUE)
++        ::close(static_cast<int>(reinterpret_cast<intptr_t>(ntHandle)));
++#endif
++      // NV-DXVK end
+     }
+   }
+ 
+diff --git a/src/d3d9/d3d9_cursor.cpp b/src/d3d9/d3d9_cursor.cpp
+index 408268c..9c0875e 100644
+--- a/src/d3d9/d3d9_cursor.cpp
++++ b/src/d3d9/d3d9_cursor.cpp
+@@ -20,6 +20,9 @@ namespace dxvk {
+   }
+ 
+ 
++// NV-DXVK start: Hardware cursors are Win32-only
++#ifdef _WIN32
++// NV-DXVK end
+   HRESULT D3D9Cursor::SetHardwareCursor(UINT XHotSpot, UINT YHotSpot, const CursorBitmap& bitmap) {
+     DWORD mask[32];
+     std::memset(mask, ~0, sizeof(mask));
+@@ -43,5 +46,13 @@ namespace dxvk {
+ 
+     return D3D_OK;
+   }
++// NV-DXVK start: Hardware cursors are Win32-only
++#else
++  HRESULT D3D9Cursor::SetHardwareCursor(UINT, UINT, const CursorBitmap&) {
++    // The headless runtime does not own an OS cursor.
++    return D3D_OK;
++  }
++#endif
++// NV-DXVK end
+ 
+ }
+\ No newline at end of file
+diff --git a/src/d3d9/d3d9_device.cpp b/src/d3d9/d3d9_device.cpp
+index e1bfd11..71c13d5 100644
+--- a/src/d3d9/d3d9_device.cpp
++++ b/src/d3d9/d3d9_device.cpp
+@@ -54,7 +54,11 @@
+ #include <cfloat>
+ #include <thread>
+ #include <future>
++// NV-DXVK start: MSVC STL internal header
++#ifdef _MSC_VER
+ #include <xutility>
++#endif
++// NV-DXVK end
+ #include "../dxvk/dxvk_scoped_annotation.h"
+ #ifdef MSC_VER
+ #pragma fenv_access (on)
+diff --git a/src/d3d9/d3d9_fixed_function.cpp b/src/d3d9/d3d9_fixed_function.cpp
+index 3205de0..4659076 100644
+--- a/src/d3d9/d3d9_fixed_function.cpp
++++ b/src/d3d9/d3d9_fixed_function.cpp
+@@ -2780,7 +2780,7 @@ namespace dxvk {
+ 
+     if (dumpPath.size() != 0) {
+       std::ofstream dumpStream(
+-        str::tows(str::format(dumpPath, "/", Name, ".spv").c_str()).c_str(),
++        str::topath(str::format(dumpPath, "/", Name, ".spv").c_str()).c_str(),
+         std::ios_base::binary | std::ios_base::trunc);
+       
+       m_shader->dump(dumpStream);
+diff --git a/src/d3d9/d3d9_rtx.cpp b/src/d3d9/d3d9_rtx.cpp
+index fcbc76b..0cacced 100644
+--- a/src/d3d9/d3d9_rtx.cpp
++++ b/src/d3d9/d3d9_rtx.cpp
+@@ -162,7 +162,7 @@ namespace dxvk {
+   void D3D9Rtx::prepareVertexCapture(const int vertexIndexOffset) {
+     ScopedCpuProfileZone();
+ 
+-    static_assert(sizeof CapturedVertex == 48, "The injected shader code is expecting this exact structure size to work correctly, see emitVertexCaptureWrite in dxso_compiler.cpp");
++    static_assert(sizeof(CapturedVertex) == 48, "The injected shader code is expecting this exact structure size to work correctly, see emitVertexCaptureWrite in dxso_compiler.cpp");
+ 
+     auto BoundShaderHas = [&](const D3D9CommonShader* shader, DxsoUsage usage, bool inOut)-> bool {
+       if (shader == nullptr)
+diff --git a/src/d3d9/d3d9_rtx_geometry.cpp b/src/d3d9/d3d9_rtx_geometry.cpp
+index 03563b2..4f40fcf 100644
+--- a/src/d3d9/d3d9_rtx_geometry.cpp
++++ b/src/d3d9/d3d9_rtx_geometry.cpp
+@@ -274,10 +274,16 @@ namespace dxvk {
+         pVertex += vertexStride;
+       }
+ 
++      // NV-DXVK start: m128_f32 is an MSVC extension, so the lanes are stored to memory instead
++      alignas(16) float minLanes[4];
++      alignas(16) float maxLanes[4];
++      _mm_store_ps(minLanes, minPos);
++      _mm_store_ps(maxLanes, maxPos);
+       AxisAlignedBoundingBox boundingBox{
+-        Vector3{ minPos.m128_f32[0], minPos.m128_f32[1], minPos.m128_f32[2] },
+-        Vector3{ maxPos.m128_f32[0], maxPos.m128_f32[1], maxPos.m128_f32[2] }
++        Vector3{ minLanes[0], minLanes[1], minLanes[2] },
++        Vector3{ maxLanes[0], maxLanes[1], maxLanes[2] }
+       };
++      // NV-DXVK end
+ #endif
+ 
+       vertexBuffer->decRef();
+diff --git a/src/d3d9/d3d9_shader.cpp b/src/d3d9/d3d9_shader.cpp
+index a708e78..7e0b01f 100644
+--- a/src/d3d9/d3d9_shader.cpp
++++ b/src/d3d9/d3d9_shader.cpp
+@@ -33,7 +33,7 @@ namespace dxvk {
+       DxsoReader reader(
+         reinterpret_cast<const char*>(pShaderBytecode));
+ 
+-      reader.store(std::ofstream(str::tows(str::format(dumpPath, "/", name, ".dxso").c_str()).c_str(),
++      reader.store(std::ofstream(str::topath(str::format(dumpPath, "/", name, ".dxso").c_str()).c_str(),
+         std::ios_base::binary | std::ios_base::trunc), bytecodeLength);
+ 
+       char comment[2048];
+@@ -45,7 +45,7 @@ namespace dxvk {
+         &blob);
+       
+       if (SUCCEEDED(hr)) {
+-        std::ofstream disassembledOut(str::tows(str::format(dumpPath, "/", name, ".dxso.dis").c_str()).c_str(), std::ios_base::binary | std::ios_base::trunc);
++        std::ofstream disassembledOut(str::topath(str::format(dumpPath, "/", name, ".dxso.dis").c_str()).c_str(), std::ios_base::binary | std::ios_base::trunc);
+         disassembledOut.write(
+           reinterpret_cast<const char*>(blob->GetBufferPointer()),
+           blob->GetBufferSize());
+@@ -87,7 +87,7 @@ namespace dxvk {
+     
+     if (dumpPath.size() != 0) {
+       std::ofstream dumpStream(
+-        str::tows(str::format(dumpPath, "/", name, ".spv").c_str()).c_str(),
++        str::topath(str::format(dumpPath, "/", name, ".spv").c_str()).c_str(),
+         std::ios_base::binary | std::ios_base::trunc);
+       
+       m_shaders[0]->dump(dumpStream);
+diff --git a/src/d3d9/d3d9_swapchain.cpp b/src/d3d9/d3d9_swapchain.cpp
+index e890ce8..aef6f1b 100644
+--- a/src/d3d9/d3d9_swapchain.cpp
++++ b/src/d3d9/d3d9_swapchain.cpp
+@@ -38,6 +38,9 @@
+ // NV-DXVK end
+ 
+ namespace dxvk {
++  // NV-DXVK start: Window procedure hooking is Win32-only. The headless Linux runtime has no game window to hook.
++#ifdef _WIN32
++  // NV-DXVK end
+   // NV-DXVK start: App Controlled FSE
+   enum FSEState {
+     Acquire = 0,
+@@ -309,6 +312,18 @@ namespace dxvk {
+     return 0;
+   }
+ 
++  // NV-DXVK start: Window procedure hooking is Win32-only
++#else
++  void ResetWindowProc(HWND) { }
++
++  void D3D9SwapChainEx::HookWindowProc(HWND) { }
++
++  class D3D9WindowMessageFilter {
++  public:
++    D3D9WindowMessageFilter(HWND, bool = true) { }
++  };
++#endif
++  // NV-DXVK end
+ 
+   static uint16_t MapGammaControlPoint(float x) {
+     if (x < 0.0f) x = 0.0f;
+diff --git a/src/dxso/dxso_compiler.cpp b/src/dxso/dxso_compiler.cpp
+index f381826..2c10777 100644
+--- a/src/dxso/dxso_compiler.cpp
++++ b/src/dxso/dxso_compiler.cpp
+@@ -572,7 +572,7 @@ namespace dxvk {
+ 
+       // Runtime array of CapturedVertex with 48B stride
+       const uint32_t capArrayType = m_module.defRuntimeArrayTypeUnique(capturedVertexType);
+-      m_module.decorateArrayStride(capArrayType, sizeof CapturedVertex);
++      m_module.decorateArrayStride(capArrayType, sizeof(CapturedVertex));
+ 
+       // SSBO block: layout(std430) CapturedVertex data[];
+       const uint32_t capBlockType = m_module.defStructTypeUnique(1, &capArrayType);
+@@ -602,7 +602,7 @@ namespace dxvk {
+       uav.sampledTypeId = floatType;
+       // NOTE: we won't use imageTypeId for member stores anymore, but keep it valid
+       uav.imageTypeId = m_module.defPointerType(capturedVertexType, spv::StorageClassUniform);
+-      uav.structStride = sizeof CapturedVertex;
++      uav.structStride = sizeof(CapturedVertex);
+       uav.structAlign = 16;
+       m_vs.vertexOutBuf = uav;
+ 
+diff --git a/src/dxvk/rtx_render/rtx_debug_view.h b/src/dxvk/rtx_render/rtx_debug_view.h
+index c0b6e44..f27822b 100644
+--- a/src/dxvk/rtx_render/rtx_debug_view.h
++++ b/src/dxvk/rtx_render/rtx_debug_view.h
+@@ -253,7 +253,9 @@ namespace dxvk {
+     Resources::Resource m_instrumentation;
+ 
+   public:
+-    ObjectPicking ObjectPicking{};
+-    Highlighting Highlighting{};
++    // NV-DXVK start: Qualified types, because a member may not change the meaning of a name already used in the class
++    dxvk::ObjectPicking ObjectPicking{};
++    dxvk::Highlighting Highlighting{};
++    // NV-DXVK end
+   };
+ } // namespace dxvk
+diff --git a/src/dxvk/rtx_render/rtx_dlfg.h b/src/dxvk/rtx_render/rtx_dlfg.h
+index b27d61b..c85a6ed 100644
+--- a/src/dxvk/rtx_render/rtx_dlfg.h
++++ b/src/dxvk/rtx_render/rtx_dlfg.h
+@@ -323,7 +323,7 @@ namespace dxvk {
+     RTX_OPTION("rtx.dlfg", bool, enablePresentMetering, true, "Use hardware present metering for DLSS 4.0 frame generation instead of CPU pacing.");
+ 
+   private:
+-    std::unique_ptr<NGXDLFGContext> m_dlfgContext = nullptr;
++    std::unique_ptr<NGXDLFGContext> m_dlfgContext; // NV-DXVK: no initializer, GCC would need the complete type in every includer
+     std::atomic<bool> m_hasDLFGFailed = { false };
+     uint32_t m_currentDisplaySize[2] = { 0,0 };
+     bool m_contextDirty = true;
+diff --git a/src/dxvk/rtx_render/rtx_remix_api.cpp b/src/dxvk/rtx_render/rtx_remix_api.cpp
+index fb63933..2b331f7 100644
+--- a/src/dxvk/rtx_render/rtx_remix_api.cpp
++++ b/src/dxvk/rtx_render/rtx_remix_api.cpp
+@@ -101,7 +101,7 @@ namespace {
+ 
+ 
+   bool isHResultAliasedWithRemixErrorCode(HRESULT hr) {
+-    switch (hr) {
++    switch (static_cast<uint32_t>(hr)) { // NV-DXVK: the codes exceed INT_MAX, which GCC rejects as a narrowing case label
+     case REMIXAPI_ERROR_CODE_HRESULT_NO_REQUIRED_GPU_FEATURES:
+     case REMIXAPI_ERROR_CODE_HRESULT_DRIVER_VERSION_BELOW_MINIMUM:
+     case REMIXAPI_ERROR_CODE_HRESULT_DXVK_INSTANCE_EXTENSION_FAIL:
+diff --git a/src/dxvk/rtx_render/rtx_texture_manager.cpp b/src/dxvk/rtx_render/rtx_texture_manager.cpp
+index 05fc8d7..67462bb 100644
+--- a/src/dxvk/rtx_render/rtx_texture_manager.cpp
++++ b/src/dxvk/rtx_render/rtx_texture_manager.cpp
+@@ -22,6 +22,12 @@
+ 
+ #include "dxvk_device.h"
+ #include "rtx_texture_manager.h"
++// NV-DXVK start: POSIX open/close for FileReadLock
++#ifndef _WIN32
++#include <fcntl.h>
++#include <unistd.h>
++#endif
++// NV-DXVK end
+ #include "../../util/thread.h"
+ #include "../../util/rc/util_rc_ptr.h"
+ #include "dxvk_context.h"
+@@ -1107,6 +1113,8 @@ namespace dxvk {
+ 
+   namespace {
+     struct FileReadLock {
++      // NV-DXVK start: Linux has no share-deny file locks, so a file another process is writing cannot be detected there
++#ifdef _WIN32
+       explicit FileReadLock(const char* filepath) {
+         m_handle = CreateFileA(
+           filepath, //
+@@ -1123,6 +1131,18 @@ namespace dxvk {
+           CloseHandle(m_handle);
+         }
+       }
++#else
++      explicit FileReadLock(const char* filepath) {
++        const int fd = ::open(filepath, O_RDONLY | O_CLOEXEC);
++        m_handle = fd >= 0 ? reinterpret_cast<HANDLE>(static_cast<intptr_t>(fd) + 1) : INVALID_HANDLE_VALUE;
++      }
++      ~FileReadLock() {
++        if (m_handle && m_handle != INVALID_HANDLE_VALUE) {
++          ::close(static_cast<int>(reinterpret_cast<intptr_t>(m_handle) - 1));
++        }
++      }
++#endif
++      // NV-DXVK end
+       bool otherProcessIsWriting() const {
+         return !m_handle || m_handle == INVALID_HANDLE_VALUE;
+       }
+-- 
+2.43.0
+
