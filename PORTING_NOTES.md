@@ -166,3 +166,10 @@ public source; DXVK `include/native` headers; headless runtime with `skipVulkanS
 6. Case-sensitivity fixes: NRC's `Include/`, `Nrc.hlsli` and `NrcHelpers.hlsli`.
    Packman data (fonts) can't be fetched from the build container, so it uses DejaVu placeholders
    *in the container only*. The real build fetches `rtx-remix-fonts@2` with the repo's Linux Packman script.
+7. **All RTX shaders compile and pass spirv-val (584 headers)** with the patched public slang.
+   This is compile-level only: SPIR-V validity says nothing about rendering correctness
+   compared with NVIDIA's slang build.
+8. USD compiled out via `REMIX_NO_USD` (material/light USD deserializers, GameCapturer stub).
+   DLSS-NR compiled out via `REMIX_NO_DLSSNR`, because its headers are only in the Windows NGX package.
+   GCC conformance fixes for code MSVC accepted. `src/dxvk/dxvk_device.cpp` passes a syntax check.
+   A full syntax sweep of `src/dxvk` is next: 74 of 173 files failing at last count.

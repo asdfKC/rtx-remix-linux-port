@@ -1,0 +1,1666 @@
+From 1126a1c6d86a592bf2acfb6ddc466360ba7dcced Mon Sep 17 00:00:00 2001
+From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
+Date: Sun, 25 Oct 2026 22:27:15 +0000
+Subject: [PATCH 3/3] linux: compile out USD and DLSS-NR, GCC conformance
+ fixes, NVAPI SAL shims
+
+- REMIX_NO_USD guards for material/light USD deserialization, a no-op
+  GameCapturer, and pxr includes in the PCH and matrix helpers.
+- REMIX_NO_DLSSNR guards: DLSS-NR headers ship only in the Windows NGX
+  package, so the feature reports unsupported.
+- Standard C++ fixes that MSVC tolerated: dependent SFINAE defaults in
+  RtxOption, deduced return types used before definition, non-trivial
+  members in anonymous structs, brace assignment ambiguity.
+- nvapi.h wrapper scopes Microsoft SAL macros to the include.
+
+All RTX shaders compile and validate with slang v2025.10.4 plus the
+cherry-picks in the port repo. dxvk_device.cpp passes a syntax check.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Tb41TgDi74v7sgH5LJBZ5A
+Signed-off-by: Claude (for Kush) <kushisthecoolest@gmail.com>
+---
+ linux/include/nvapi.h                         |   7 +
+ linux/include/remix_linux_compat.h            |   5 +
+ linux/include/remix_sal.h                     | 582 ++++++++++++++++++
+ linux/include/remix_sal_undef.h               | 194 ++++++
+ meson.build                                   |   5 +
+ src/dxvk/pch/dxvk.pch.h                       |   6 +
+ src/dxvk/rtx_render/rtx_asset_replacer.h      |   4 +-
+ src/dxvk/rtx_render/rtx_camera_manager.h      |   4 +-
+ src/dxvk/rtx_render/rtx_game_capturer.h       |  86 ++-
+ src/dxvk/rtx_render/rtx_lights.h              |  10 +
+ src/dxvk/rtx_render/rtx_lights_data.cpp       |  71 +++
+ src/dxvk/rtx_render/rtx_lights_data.h         |  24 +
+ src/dxvk/rtx_render/rtx_material_data.h       |  43 +-
+ src/dxvk/rtx_render/rtx_matrix_helpers.h      |   6 +
+ src/dxvk/rtx_render/rtx_ngx_wrapper.cpp       |  28 +-
+ src/dxvk/rtx_render/rtx_ngx_wrapper.h         |   4 +
+ src/dxvk/rtx_render/rtx_option.h              |  22 +-
+ src/dxvk/rtx_render/rtx_options.h             |   6 +
+ .../pass/particles/particle_system_common.h   |   2 +-
+ 19 files changed, 1084 insertions(+), 25 deletions(-)
+ create mode 100644 linux/include/nvapi.h
+ create mode 100644 linux/include/remix_sal.h
+ create mode 100644 linux/include/remix_sal_undef.h
+
+diff --git a/linux/include/nvapi.h b/linux/include/nvapi.h
+new file mode 100644
+index 0000000..3ce268f
+--- /dev/null
++++ b/linux/include/nvapi.h
+@@ -0,0 +1,7 @@
++#pragma once
++// Wraps the NVAPI header for the native Linux build. NVAPI uses Microsoft SAL annotations,
++// which would clash with libstdc++ internals if they stayed defined, so they only exist around the include.
++// NVAPI itself is unavailable on Linux. linux/stubs implements the entry points the runtime calls as failing.
++#include "remix_sal.h"
++#include_next <nvapi.h>
++#include "remix_sal_undef.h"
+diff --git a/linux/include/remix_linux_compat.h b/linux/include/remix_linux_compat.h
+index 22a1dba..eec2579 100644
+--- a/linux/include/remix_linux_compat.h
++++ b/linux/include/remix_linux_compat.h
+@@ -63,6 +63,11 @@
+ #define MAX_PATH 260
+ #endif
+ 
++// MSVC calling conventions and SAL annotations used by vendor headers.
++#ifndef __cdecl
++#define __cdecl
++#endif
++
+ #ifndef __forceinline
+ #define __forceinline inline __attribute__((always_inline))
+ #endif
+diff --git a/linux/include/remix_sal.h b/linux/include/remix_sal.h
+new file mode 100644
+index 0000000..493af63
+--- /dev/null
++++ b/linux/include/remix_sal.h
+@@ -0,0 +1,582 @@
++// Empty Microsoft SAL annotations for vendor headers (NVAPI) in the native Linux build.
++// Generated from submodules/nvapi/nvapi_lite_salstart.h. Predefining them keeps nvapi_lite_salend.h from undefining them.
++
++#ifndef __ecount
++#define __ecount(size)
++#endif
++#ifndef __bcount
++#define __bcount(size)
++#endif
++#ifndef __in
++#define __in
++#endif
++#ifndef __in_ecount
++#define __in_ecount(size)
++#endif
++#ifndef __in_bcount
++#define __in_bcount(size)
++#endif
++#ifndef __in_z
++#define __in_z
++#endif
++#ifndef __in_ecount_z
++#define __in_ecount_z(size)
++#endif
++#ifndef __in_bcount_z
++#define __in_bcount_z(size)
++#endif
++#ifndef __in_nz
++#define __in_nz
++#endif
++#ifndef __in_ecount_nz
++#define __in_ecount_nz(size)
++#endif
++#ifndef __in_bcount_nz
++#define __in_bcount_nz(size)
++#endif
++#ifndef __out
++#define __out
++#endif
++#ifndef __out_ecount
++#define __out_ecount(size)
++#endif
++#ifndef __out_bcount
++#define __out_bcount(size)
++#endif
++#ifndef __out_ecount_part
++#define __out_ecount_part(size,length)
++#endif
++#ifndef __out_bcount_part
++#define __out_bcount_part(size,length)
++#endif
++#ifndef __out_ecount_full
++#define __out_ecount_full(size)
++#endif
++#ifndef __out_bcount_full
++#define __out_bcount_full(size)
++#endif
++#ifndef __out_z
++#define __out_z
++#endif
++#ifndef __out_z_opt
++#define __out_z_opt
++#endif
++#ifndef __out_ecount_z
++#define __out_ecount_z(size)
++#endif
++#ifndef __out_bcount_z
++#define __out_bcount_z(size)
++#endif
++#ifndef __out_ecount_part_z
++#define __out_ecount_part_z(size,length)
++#endif
++#ifndef __out_bcount_part_z
++#define __out_bcount_part_z(size,length)
++#endif
++#ifndef __out_ecount_full_z
++#define __out_ecount_full_z(size)
++#endif
++#ifndef __out_bcount_full_z
++#define __out_bcount_full_z(size)
++#endif
++#ifndef __out_nz
++#define __out_nz
++#endif
++#ifndef __out_nz_opt
++#define __out_nz_opt
++#endif
++#ifndef __out_ecount_nz
++#define __out_ecount_nz(size)
++#endif
++#ifndef __out_bcount_nz
++#define __out_bcount_nz(size)
++#endif
++#ifndef __inout
++#define __inout
++#endif
++#ifndef __inout_ecount
++#define __inout_ecount(size)
++#endif
++#ifndef __inout_bcount
++#define __inout_bcount(size)
++#endif
++#ifndef __inout_ecount_part
++#define __inout_ecount_part(size,length)
++#endif
++#ifndef __inout_bcount_part
++#define __inout_bcount_part(size,length)
++#endif
++#ifndef __inout_ecount_full
++#define __inout_ecount_full(size)
++#endif
++#ifndef __inout_bcount_full
++#define __inout_bcount_full(size)
++#endif
++#ifndef __inout_z
++#define __inout_z
++#endif
++#ifndef __inout_ecount_z
++#define __inout_ecount_z(size)
++#endif
++#ifndef __inout_bcount_z
++#define __inout_bcount_z(size)
++#endif
++#ifndef __inout_nz
++#define __inout_nz
++#endif
++#ifndef __inout_ecount_nz
++#define __inout_ecount_nz(size)
++#endif
++#ifndef __inout_bcount_nz
++#define __inout_bcount_nz(size)
++#endif
++#ifndef __ecount_opt
++#define __ecount_opt(size)
++#endif
++#ifndef __bcount_opt
++#define __bcount_opt(size)
++#endif
++#ifndef __in_opt
++#define __in_opt
++#endif
++#ifndef __in_ecount_opt
++#define __in_ecount_opt(size)
++#endif
++#ifndef __in_bcount_opt
++#define __in_bcount_opt(size)
++#endif
++#ifndef __in_z_opt
++#define __in_z_opt
++#endif
++#ifndef __in_ecount_z_opt
++#define __in_ecount_z_opt(size)
++#endif
++#ifndef __in_bcount_z_opt
++#define __in_bcount_z_opt(size)
++#endif
++#ifndef __in_nz_opt
++#define __in_nz_opt
++#endif
++#ifndef __in_ecount_nz_opt
++#define __in_ecount_nz_opt(size)
++#endif
++#ifndef __in_bcount_nz_opt
++#define __in_bcount_nz_opt(size)
++#endif
++#ifndef __out_opt
++#define __out_opt
++#endif
++#ifndef __out_ecount_opt
++#define __out_ecount_opt(size)
++#endif
++#ifndef __out_bcount_opt
++#define __out_bcount_opt(size)
++#endif
++#ifndef __out_ecount_part_opt
++#define __out_ecount_part_opt(size,length)
++#endif
++#ifndef __out_bcount_part_opt
++#define __out_bcount_part_opt(size,length)
++#endif
++#ifndef __out_ecount_full_opt
++#define __out_ecount_full_opt(size)
++#endif
++#ifndef __out_bcount_full_opt
++#define __out_bcount_full_opt(size)
++#endif
++#ifndef __out_ecount_z_opt
++#define __out_ecount_z_opt(size)
++#endif
++#ifndef __out_bcount_z_opt
++#define __out_bcount_z_opt(size)
++#endif
++#ifndef __out_ecount_part_z_opt
++#define __out_ecount_part_z_opt(size,length)
++#endif
++#ifndef __out_bcount_part_z_opt
++#define __out_bcount_part_z_opt(size,length)
++#endif
++#ifndef __out_ecount_full_z_opt
++#define __out_ecount_full_z_opt(size)
++#endif
++#ifndef __out_bcount_full_z_opt
++#define __out_bcount_full_z_opt(size)
++#endif
++#ifndef __out_ecount_nz_opt
++#define __out_ecount_nz_opt(size)
++#endif
++#ifndef __out_bcount_nz_opt
++#define __out_bcount_nz_opt(size)
++#endif
++#ifndef __inout_opt
++#define __inout_opt
++#endif
++#ifndef __inout_ecount_opt
++#define __inout_ecount_opt(size)
++#endif
++#ifndef __inout_bcount_opt
++#define __inout_bcount_opt(size)
++#endif
++#ifndef __inout_ecount_part_opt
++#define __inout_ecount_part_opt(size,length)
++#endif
++#ifndef __inout_bcount_part_opt
++#define __inout_bcount_part_opt(size,length)
++#endif
++#ifndef __inout_ecount_full_opt
++#define __inout_ecount_full_opt(size)
++#endif
++#ifndef __inout_bcount_full_opt
++#define __inout_bcount_full_opt(size)
++#endif
++#ifndef __inout_z_opt
++#define __inout_z_opt
++#endif
++#ifndef __inout_ecount_z_opt
++#define __inout_ecount_z_opt(size)
++#endif
++#ifndef __inout_bcount_z_opt
++#define __inout_bcount_z_opt(size)
++#endif
++#ifndef __inout_nz_opt
++#define __inout_nz_opt
++#endif
++#ifndef __inout_ecount_nz_opt
++#define __inout_ecount_nz_opt(size)
++#endif
++#ifndef __inout_bcount_nz_opt
++#define __inout_bcount_nz_opt(size)
++#endif
++#ifndef __deref_ecount
++#define __deref_ecount(size)
++#endif
++#ifndef __deref_bcount
++#define __deref_bcount(size)
++#endif
++#ifndef __deref_out
++#define __deref_out
++#endif
++#ifndef __deref_out_ecount
++#define __deref_out_ecount(size)
++#endif
++#ifndef __deref_out_bcount
++#define __deref_out_bcount(size)
++#endif
++#ifndef __deref_out_ecount_part
++#define __deref_out_ecount_part(size,length)
++#endif
++#ifndef __deref_out_bcount_part
++#define __deref_out_bcount_part(size,length)
++#endif
++#ifndef __deref_out_ecount_full
++#define __deref_out_ecount_full(size)
++#endif
++#ifndef __deref_out_bcount_full
++#define __deref_out_bcount_full(size)
++#endif
++#ifndef __deref_out_z
++#define __deref_out_z
++#endif
++#ifndef __deref_out_ecount_z
++#define __deref_out_ecount_z(size)
++#endif
++#ifndef __deref_out_bcount_z
++#define __deref_out_bcount_z(size)
++#endif
++#ifndef __deref_out_nz
++#define __deref_out_nz
++#endif
++#ifndef __deref_out_ecount_nz
++#define __deref_out_ecount_nz(size)
++#endif
++#ifndef __deref_out_bcount_nz
++#define __deref_out_bcount_nz(size)
++#endif
++#ifndef __deref_inout
++#define __deref_inout
++#endif
++#ifndef __deref_inout_z
++#define __deref_inout_z
++#endif
++#ifndef __deref_inout_ecount
++#define __deref_inout_ecount(size)
++#endif
++#ifndef __deref_inout_bcount
++#define __deref_inout_bcount(size)
++#endif
++#ifndef __deref_inout_ecount_part
++#define __deref_inout_ecount_part(size,length)
++#endif
++#ifndef __deref_inout_bcount_part
++#define __deref_inout_bcount_part(size,length)
++#endif
++#ifndef __deref_inout_ecount_full
++#define __deref_inout_ecount_full(size)
++#endif
++#ifndef __deref_inout_bcount_full
++#define __deref_inout_bcount_full(size)
++#endif
++#ifndef __deref_inout_ecount_z
++#define __deref_inout_ecount_z(size)
++#endif
++#ifndef __deref_inout_bcount_z
++#define __deref_inout_bcount_z(size)
++#endif
++#ifndef __deref_inout_nz
++#define __deref_inout_nz
++#endif
++#ifndef __deref_inout_ecount_nz
++#define __deref_inout_ecount_nz(size)
++#endif
++#ifndef __deref_inout_bcount_nz
++#define __deref_inout_bcount_nz(size)
++#endif
++#ifndef __deref_ecount_opt
++#define __deref_ecount_opt(size)
++#endif
++#ifndef __deref_bcount_opt
++#define __deref_bcount_opt(size)
++#endif
++#ifndef __deref_out_opt
++#define __deref_out_opt
++#endif
++#ifndef __deref_out_ecount_opt
++#define __deref_out_ecount_opt(size)
++#endif
++#ifndef __deref_out_bcount_opt
++#define __deref_out_bcount_opt(size)
++#endif
++#ifndef __deref_out_ecount_part_opt
++#define __deref_out_ecount_part_opt(size,length)
++#endif
++#ifndef __deref_out_bcount_part_opt
++#define __deref_out_bcount_part_opt(size,length)
++#endif
++#ifndef __deref_out_ecount_full_opt
++#define __deref_out_ecount_full_opt(size)
++#endif
++#ifndef __deref_out_bcount_full_opt
++#define __deref_out_bcount_full_opt(size)
++#endif
++#ifndef __deref_out_z_opt
++#define __deref_out_z_opt
++#endif
++#ifndef __deref_out_ecount_z_opt
++#define __deref_out_ecount_z_opt(size)
++#endif
++#ifndef __deref_out_bcount_z_opt
++#define __deref_out_bcount_z_opt(size)
++#endif
++#ifndef __deref_out_nz_opt
++#define __deref_out_nz_opt
++#endif
++#ifndef __deref_out_ecount_nz_opt
++#define __deref_out_ecount_nz_opt(size)
++#endif
++#ifndef __deref_out_bcount_nz_opt
++#define __deref_out_bcount_nz_opt(size)
++#endif
++#ifndef __deref_inout_opt
++#define __deref_inout_opt
++#endif
++#ifndef __deref_inout_ecount_opt
++#define __deref_inout_ecount_opt(size)
++#endif
++#ifndef __deref_inout_bcount_opt
++#define __deref_inout_bcount_opt(size)
++#endif
++#ifndef __deref_inout_ecount_part_opt
++#define __deref_inout_ecount_part_opt(size,length)
++#endif
++#ifndef __deref_inout_bcount_part_opt
++#define __deref_inout_bcount_part_opt(size,length)
++#endif
++#ifndef __deref_inout_ecount_full_opt
++#define __deref_inout_ecount_full_opt(size)
++#endif
++#ifndef __deref_inout_bcount_full_opt
++#define __deref_inout_bcount_full_opt(size)
++#endif
++#ifndef __deref_inout_z_opt
++#define __deref_inout_z_opt
++#endif
++#ifndef __deref_inout_ecount_z_opt
++#define __deref_inout_ecount_z_opt(size)
++#endif
++#ifndef __deref_inout_bcount_z_opt
++#define __deref_inout_bcount_z_opt(size)
++#endif
++#ifndef __deref_inout_nz_opt
++#define __deref_inout_nz_opt
++#endif
++#ifndef __deref_inout_ecount_nz_opt
++#define __deref_inout_ecount_nz_opt(size)
++#endif
++#ifndef __deref_inout_bcount_nz_opt
++#define __deref_inout_bcount_nz_opt(size)
++#endif
++#ifndef __deref_opt_ecount
++#define __deref_opt_ecount(size)
++#endif
++#ifndef __deref_opt_bcount
++#define __deref_opt_bcount(size)
++#endif
++#ifndef __deref_opt_out
++#define __deref_opt_out
++#endif
++#ifndef __deref_opt_out_z
++#define __deref_opt_out_z
++#endif
++#ifndef __deref_opt_out_ecount
++#define __deref_opt_out_ecount(size)
++#endif
++#ifndef __deref_opt_out_bcount
++#define __deref_opt_out_bcount(size)
++#endif
++#ifndef __deref_opt_out_ecount_part
++#define __deref_opt_out_ecount_part(size,length)
++#endif
++#ifndef __deref_opt_out_bcount_part
++#define __deref_opt_out_bcount_part(size,length)
++#endif
++#ifndef __deref_opt_out_ecount_full
++#define __deref_opt_out_ecount_full(size)
++#endif
++#ifndef __deref_opt_out_bcount_full
++#define __deref_opt_out_bcount_full(size)
++#endif
++#ifndef __deref_opt_inout
++#define __deref_opt_inout
++#endif
++#ifndef __deref_opt_inout_ecount
++#define __deref_opt_inout_ecount(size)
++#endif
++#ifndef __deref_opt_inout_bcount
++#define __deref_opt_inout_bcount(size)
++#endif
++#ifndef __deref_opt_inout_ecount_part
++#define __deref_opt_inout_ecount_part(size,length)
++#endif
++#ifndef __deref_opt_inout_bcount_part
++#define __deref_opt_inout_bcount_part(size,length)
++#endif
++#ifndef __deref_opt_inout_ecount_full
++#define __deref_opt_inout_ecount_full(size)
++#endif
++#ifndef __deref_opt_inout_bcount_full
++#define __deref_opt_inout_bcount_full(size)
++#endif
++#ifndef __deref_opt_inout_z
++#define __deref_opt_inout_z
++#endif
++#ifndef __deref_opt_inout_ecount_z
++#define __deref_opt_inout_ecount_z(size)
++#endif
++#ifndef __deref_opt_inout_bcount_z
++#define __deref_opt_inout_bcount_z(size)
++#endif
++#ifndef __deref_opt_inout_nz
++#define __deref_opt_inout_nz
++#endif
++#ifndef __deref_opt_inout_ecount_nz
++#define __deref_opt_inout_ecount_nz(size)
++#endif
++#ifndef __deref_opt_inout_bcount_nz
++#define __deref_opt_inout_bcount_nz(size)
++#endif
++#ifndef __deref_opt_ecount_opt
++#define __deref_opt_ecount_opt(size)
++#endif
++#ifndef __deref_opt_bcount_opt
++#define __deref_opt_bcount_opt(size)
++#endif
++#ifndef __deref_opt_out_opt
++#define __deref_opt_out_opt
++#endif
++#ifndef __deref_opt_out_ecount_opt
++#define __deref_opt_out_ecount_opt(size)
++#endif
++#ifndef __deref_opt_out_bcount_opt
++#define __deref_opt_out_bcount_opt(size)
++#endif
++#ifndef __deref_opt_out_ecount_part_opt
++#define __deref_opt_out_ecount_part_opt(size,length)
++#endif
++#ifndef __deref_opt_out_bcount_part_opt
++#define __deref_opt_out_bcount_part_opt(size,length)
++#endif
++#ifndef __deref_opt_out_ecount_full_opt
++#define __deref_opt_out_ecount_full_opt(size)
++#endif
++#ifndef __deref_opt_out_bcount_full_opt
++#define __deref_opt_out_bcount_full_opt(size)
++#endif
++#ifndef __deref_opt_out_z_opt
++#define __deref_opt_out_z_opt
++#endif
++#ifndef __deref_opt_out_ecount_z_opt
++#define __deref_opt_out_ecount_z_opt(size)
++#endif
++#ifndef __deref_opt_out_bcount_z_opt
++#define __deref_opt_out_bcount_z_opt(size)
++#endif
++#ifndef __deref_opt_out_nz_opt
++#define __deref_opt_out_nz_opt
++#endif
++#ifndef __deref_opt_out_ecount_nz_opt
++#define __deref_opt_out_ecount_nz_opt(size)
++#endif
++#ifndef __deref_opt_out_bcount_nz_opt
++#define __deref_opt_out_bcount_nz_opt(size)
++#endif
++#ifndef __deref_opt_inout_opt
++#define __deref_opt_inout_opt
++#endif
++#ifndef __deref_opt_inout_ecount_opt
++#define __deref_opt_inout_ecount_opt(size)
++#endif
++#ifndef __deref_opt_inout_bcount_opt
++#define __deref_opt_inout_bcount_opt(size)
++#endif
++#ifndef __deref_opt_inout_ecount_part_opt
++#define __deref_opt_inout_ecount_part_opt(size,length)
++#endif
++#ifndef __deref_opt_inout_bcount_part_opt
++#define __deref_opt_inout_bcount_part_opt(size,length)
++#endif
++#ifndef __deref_opt_inout_ecount_full_opt
++#define __deref_opt_inout_ecount_full_opt(size)
++#endif
++#ifndef __deref_opt_inout_bcount_full_opt
++#define __deref_opt_inout_bcount_full_opt(size)
++#endif
++#ifndef __deref_opt_inout_z_opt
++#define __deref_opt_inout_z_opt
++#endif
++#ifndef __deref_opt_inout_ecount_z_opt
++#define __deref_opt_inout_ecount_z_opt(size)
++#endif
++#ifndef __deref_opt_inout_bcount_z_opt
++#define __deref_opt_inout_bcount_z_opt(size)
++#endif
++#ifndef __deref_opt_inout_nz_opt
++#define __deref_opt_inout_nz_opt
++#endif
++#ifndef __deref_opt_inout_ecount_nz_opt
++#define __deref_opt_inout_ecount_nz_opt(size)
++#endif
++#ifndef __deref_opt_inout_bcount_nz_opt
++#define __deref_opt_inout_bcount_nz_opt(size)
++#endif
++#ifndef __success
++#define __success(epxr)
++#endif
++#ifndef _Ret_notnull_
++#define _Ret_notnull_
++#endif
++#ifndef _Post_writable_byte_size_
++#define _Post_writable_byte_size_(n)
++#endif
++#ifndef _Outptr_
++#define _Outptr_
++#endif
+diff --git a/linux/include/remix_sal_undef.h b/linux/include/remix_sal_undef.h
+new file mode 100644
+index 0000000..f73b247
+--- /dev/null
++++ b/linux/include/remix_sal_undef.h
+@@ -0,0 +1,194 @@
++// Removes the annotations remix_sal.h defines. Generated alongside it.
++#undef __ecount
++#undef __bcount
++#undef __in
++#undef __in_ecount
++#undef __in_bcount
++#undef __in_z
++#undef __in_ecount_z
++#undef __in_bcount_z
++#undef __in_nz
++#undef __in_ecount_nz
++#undef __in_bcount_nz
++#undef __out
++#undef __out_ecount
++#undef __out_bcount
++#undef __out_ecount_part
++#undef __out_bcount_part
++#undef __out_ecount_full
++#undef __out_bcount_full
++#undef __out_z
++#undef __out_z_opt
++#undef __out_ecount_z
++#undef __out_bcount_z
++#undef __out_ecount_part_z
++#undef __out_bcount_part_z
++#undef __out_ecount_full_z
++#undef __out_bcount_full_z
++#undef __out_nz
++#undef __out_nz_opt
++#undef __out_ecount_nz
++#undef __out_bcount_nz
++#undef __inout
++#undef __inout_ecount
++#undef __inout_bcount
++#undef __inout_ecount_part
++#undef __inout_bcount_part
++#undef __inout_ecount_full
++#undef __inout_bcount_full
++#undef __inout_z
++#undef __inout_ecount_z
++#undef __inout_bcount_z
++#undef __inout_nz
++#undef __inout_ecount_nz
++#undef __inout_bcount_nz
++#undef __ecount_opt
++#undef __bcount_opt
++#undef __in_opt
++#undef __in_ecount_opt
++#undef __in_bcount_opt
++#undef __in_z_opt
++#undef __in_ecount_z_opt
++#undef __in_bcount_z_opt
++#undef __in_nz_opt
++#undef __in_ecount_nz_opt
++#undef __in_bcount_nz_opt
++#undef __out_opt
++#undef __out_ecount_opt
++#undef __out_bcount_opt
++#undef __out_ecount_part_opt
++#undef __out_bcount_part_opt
++#undef __out_ecount_full_opt
++#undef __out_bcount_full_opt
++#undef __out_ecount_z_opt
++#undef __out_bcount_z_opt
++#undef __out_ecount_part_z_opt
++#undef __out_bcount_part_z_opt
++#undef __out_ecount_full_z_opt
++#undef __out_bcount_full_z_opt
++#undef __out_ecount_nz_opt
++#undef __out_bcount_nz_opt
++#undef __inout_opt
++#undef __inout_ecount_opt
++#undef __inout_bcount_opt
++#undef __inout_ecount_part_opt
++#undef __inout_bcount_part_opt
++#undef __inout_ecount_full_opt
++#undef __inout_bcount_full_opt
++#undef __inout_z_opt
++#undef __inout_ecount_z_opt
++#undef __inout_bcount_z_opt
++#undef __inout_nz_opt
++#undef __inout_ecount_nz_opt
++#undef __inout_bcount_nz_opt
++#undef __deref_ecount
++#undef __deref_bcount
++#undef __deref_out
++#undef __deref_out_ecount
++#undef __deref_out_bcount
++#undef __deref_out_ecount_part
++#undef __deref_out_bcount_part
++#undef __deref_out_ecount_full
++#undef __deref_out_bcount_full
++#undef __deref_out_z
++#undef __deref_out_ecount_z
++#undef __deref_out_bcount_z
++#undef __deref_out_nz
++#undef __deref_out_ecount_nz
++#undef __deref_out_bcount_nz
++#undef __deref_inout
++#undef __deref_inout_z
++#undef __deref_inout_ecount
++#undef __deref_inout_bcount
++#undef __deref_inout_ecount_part
++#undef __deref_inout_bcount_part
++#undef __deref_inout_ecount_full
++#undef __deref_inout_bcount_full
++#undef __deref_inout_ecount_z
++#undef __deref_inout_bcount_z
++#undef __deref_inout_nz
++#undef __deref_inout_ecount_nz
++#undef __deref_inout_bcount_nz
++#undef __deref_ecount_opt
++#undef __deref_bcount_opt
++#undef __deref_out_opt
++#undef __deref_out_ecount_opt
++#undef __deref_out_bcount_opt
++#undef __deref_out_ecount_part_opt
++#undef __deref_out_bcount_part_opt
++#undef __deref_out_ecount_full_opt
++#undef __deref_out_bcount_full_opt
++#undef __deref_out_z_opt
++#undef __deref_out_ecount_z_opt
++#undef __deref_out_bcount_z_opt
++#undef __deref_out_nz_opt
++#undef __deref_out_ecount_nz_opt
++#undef __deref_out_bcount_nz_opt
++#undef __deref_inout_opt
++#undef __deref_inout_ecount_opt
++#undef __deref_inout_bcount_opt
++#undef __deref_inout_ecount_part_opt
++#undef __deref_inout_bcount_part_opt
++#undef __deref_inout_ecount_full_opt
++#undef __deref_inout_bcount_full_opt
++#undef __deref_inout_z_opt
++#undef __deref_inout_ecount_z_opt
++#undef __deref_inout_bcount_z_opt
++#undef __deref_inout_nz_opt
++#undef __deref_inout_ecount_nz_opt
++#undef __deref_inout_bcount_nz_opt
++#undef __deref_opt_ecount
++#undef __deref_opt_bcount
++#undef __deref_opt_out
++#undef __deref_opt_out_z
++#undef __deref_opt_out_ecount
++#undef __deref_opt_out_bcount
++#undef __deref_opt_out_ecount_part
++#undef __deref_opt_out_bcount_part
++#undef __deref_opt_out_ecount_full
++#undef __deref_opt_out_bcount_full
++#undef __deref_opt_inout
++#undef __deref_opt_inout_ecount
++#undef __deref_opt_inout_bcount
++#undef __deref_opt_inout_ecount_part
++#undef __deref_opt_inout_bcount_part
++#undef __deref_opt_inout_ecount_full
++#undef __deref_opt_inout_bcount_full
++#undef __deref_opt_inout_z
++#undef __deref_opt_inout_ecount_z
++#undef __deref_opt_inout_bcount_z
++#undef __deref_opt_inout_nz
++#undef __deref_opt_inout_ecount_nz
++#undef __deref_opt_inout_bcount_nz
++#undef __deref_opt_ecount_opt
++#undef __deref_opt_bcount_opt
++#undef __deref_opt_out_opt
++#undef __deref_opt_out_ecount_opt
++#undef __deref_opt_out_bcount_opt
++#undef __deref_opt_out_ecount_part_opt
++#undef __deref_opt_out_bcount_part_opt
++#undef __deref_opt_out_ecount_full_opt
++#undef __deref_opt_out_bcount_full_opt
++#undef __deref_opt_out_z_opt
++#undef __deref_opt_out_ecount_z_opt
++#undef __deref_opt_out_bcount_z_opt
++#undef __deref_opt_out_nz_opt
++#undef __deref_opt_out_ecount_nz_opt
++#undef __deref_opt_out_bcount_nz_opt
++#undef __deref_opt_inout_opt
++#undef __deref_opt_inout_ecount_opt
++#undef __deref_opt_inout_bcount_opt
++#undef __deref_opt_inout_ecount_part_opt
++#undef __deref_opt_inout_bcount_part_opt
++#undef __deref_opt_inout_ecount_full_opt
++#undef __deref_opt_inout_bcount_full_opt
++#undef __deref_opt_inout_z_opt
++#undef __deref_opt_inout_ecount_z_opt
++#undef __deref_opt_inout_bcount_z_opt
++#undef __deref_opt_inout_nz_opt
++#undef __deref_opt_inout_ecount_nz_opt
++#undef __deref_opt_inout_bcount_nz_opt
++#undef __success
++#undef _Ret_notnull_
++#undef _Post_writable_byte_size_
++#undef _Outptr_
+diff --git a/meson.build b/meson.build
+index 4a64590..7b3b65b 100644
+--- a/meson.build
++++ b/meson.build
+@@ -57,6 +57,7 @@ if dxvk_is_linux
+     '-DDXVK_NATIVE=1',
+     '-DREMIX_NATIVE_LINUX=1',
+     '-DREMIX_NO_USD=1',
++    '-DREMIX_NO_DLSSNR=1',
+     '-DREMIX_SENTRY_ENABLED=0',
+     '-DBUILD_NINJA=1',
+     '-DVK_ENABLE_BETA_EXTENSIONS',
+@@ -112,6 +113,10 @@ if dxvk_is_linux
+     './linux/native',
+     './linux/native/windows',
+     './linux/native/directx',
++    # MSVC also searches the directories of every open includer. These two cover the cases the sources rely on.
++    './src/dxvk',
++    './src/dxvk/rtx_render',
++    './submodules/nvapi',
+   ]
+   dxvk_include_path = include_directories(dxvk_include_dirs)
+   dxvk_shader_include_path = include_directories('./src/dxvk/shaders')
+diff --git a/src/dxvk/pch/dxvk.pch.h b/src/dxvk/pch/dxvk.pch.h
+index dca16ce..882f6b9 100644
+--- a/src/dxvk/pch/dxvk.pch.h
++++ b/src/dxvk/pch/dxvk.pch.h
+@@ -30,12 +30,18 @@
+ #include <limits>
+ 
+ #include "../../lssusd/mdl_helpers.h"
++// NV-DXVK start: USD is compiled out of the native Linux build
++#ifndef REMIX_NO_USD
++// NV-DXVK end
+ #include "../../lssusd/particle_system_helpers.h"
+ #include "../../lssusd/usd_include_begin.h"
+ #include <pxr/base/vt/value.h>
+ #include <pxr/usd/usd/tokens.h>
+ #include <pxr/usd/usd/prim.h>
+ #include "../../lssusd/usd_include_end.h"
++// NV-DXVK start: USD is compiled out of the native Linux build
++#endif
++// NV-DXVK end
+ 
+ #include <nvsdk_ngx.h>
+ 
+diff --git a/src/dxvk/rtx_render/rtx_asset_replacer.h b/src/dxvk/rtx_render/rtx_asset_replacer.h
+index be60493..63cc0ca 100644
+--- a/src/dxvk/rtx_render/rtx_asset_replacer.h
++++ b/src/dxvk/rtx_render/rtx_asset_replacer.h
+@@ -491,7 +491,9 @@ namespace dxvk {
+     }
+ 
+     template<typename Cache, typename T>
+-    auto storeCached(Cache& cache, XXH64_hash_t hash, T&& obj) {
++    // NV-DXVK start: GCC needs the return type before the inline callers above use it
++    typename Cache::mapped_type storeCached(Cache& cache, XXH64_hash_t hash, T&& obj) {
++    // NV-DXVK end
+       std::lock_guard<sync::Spinlock> lock(m_spinlock);
+       auto [it, inserted] = cache.try_emplace(hash);
+       if (inserted || !it->second) {
+diff --git a/src/dxvk/rtx_render/rtx_camera_manager.h b/src/dxvk/rtx_render/rtx_camera_manager.h
+index bc61e77..b64f064 100644
+--- a/src/dxvk/rtx_render/rtx_camera_manager.h
++++ b/src/dxvk/rtx_render/rtx_camera_manager.h
+@@ -65,7 +65,9 @@ namespace dxvk {
+     template<
+       typename T,
+       std::enable_if_t<std::is_same_v<T, CameraManager> || std::is_same_v<T, const CameraManager>, bool> = true>
+-    static auto& accessCamera(T& cameraManager, CameraType::Enum cameraType) {
++    // NV-DXVK start: GCC needs the return type before the inline callers above use it
++    static std::conditional_t<std::is_const_v<T>, const RtCamera&, RtCamera&> accessCamera(T& cameraManager, CameraType::Enum cameraType) {
++    // NV-DXVK end
+       assert(cameraType < CameraType::Count);
+       // Default Unknown to Main camera object
+       // since cameras can get rejected but rtx pipeline can
+diff --git a/src/dxvk/rtx_render/rtx_game_capturer.h b/src/dxvk/rtx_render/rtx_game_capturer.h
+index f057d63..b34af90 100644
+--- a/src/dxvk/rtx_render/rtx_game_capturer.h
++++ b/src/dxvk/rtx_render/rtx_game_capturer.h
+@@ -71,6 +71,87 @@
+ 
+ #pragma once
+ 
++// NV-DXVK start: The native Linux build compiles USD out, so game capture is a no-op stub there
++#ifdef REMIX_NO_USD
++#include "rtx_options.h"
++#include "../../util/rc/util_rc_ptr.h"
++#include "../../util/rc/util_rc.h"
++#include "../../util/util_flags.h"
++#include "../../util/util_matrix.h"
++#include "../../util/xxHash/xxhash.h"
++#include "../imgui/dxvk_imgui.h"
++#include <mutex>
++#include <string>
++#include <unordered_map>
++#include <vector>
++
++namespace dxvk
++{
++class DxvkContext;
++class DxvkDevice;
++class SceneManager;
++class AssetExporter;
++class RtInstance;
++
++class GameCapturer : public RcObject
++{
++public:
++  RTX_OPTION("rtx.capture", bool, correctBakedTransforms, false,
++             "Some games bake world transforms into mesh vertices. Game capture is not available in the Linux build.");
++
++  GameCapturer(DxvkDevice* const, SceneManager&, AssetExporter&) { }
++  ~GameCapturer() { }
++
++  void step(const Rc<DxvkContext>, const HWND) { }
++
++  void triggerNewCapture() {
++    Logger::warn("[GameCapturer] USD capture is not available in the Linux build.");
++  }
++
++  enum class InstFlag : uint8_t {
++    PositionsUpdate = 0,
++    NormalsUpdate = 1,
++    IndexUpdate = 2,
++    XformUpdate = 3
++  };
++  void setInstanceUpdateFlag(const RtInstance&, const InstFlag) { }
++
++  FLAGS(State, uint8_t,
++    Initializing,
++    Capturing,
++    BeginExport,
++    PreppingExport,
++    Exporting,
++    Complete,
++    Failed
++  );
++  const State& getState() const {
++    return m_state;
++  }
++
++  bool isIdle() const {
++    return true;
++  }
++
++  struct CompletedCapture {
++    std::string stageName;
++    std::string stagePath;
++  } m_completeCapture;
++  const CompletedCapture& queryCompleteCapture() const {
++    return m_completeCapture;
++  }
++
++  static std::string getCaptureInstanceStageNameWithTimestamp() {
++    return "capture";
++  }
++
++private:
++  State m_state;
++};
++}
++#else
++// NV-DXVK end
++
+ #include "rtx_game_capturer_utils.h"
+ #include "rtx_options.h"
+ 
+@@ -342,4 +423,7 @@ private:
+   std::unique_ptr<Capture> m_pCap;
+ };
+ 
+-}
+\ No newline at end of file
++}
++// NV-DXVK start: The native Linux build compiles USD out
++#endif
++// NV-DXVK end
+diff --git a/src/dxvk/rtx_render/rtx_lights.h b/src/dxvk/rtx_render/rtx_lights.h
+index 35ab4cb..60d0ed9 100644
+--- a/src/dxvk/rtx_render/rtx_lights.h
++++ b/src/dxvk/rtx_render/rtx_lights.h
+@@ -685,6 +685,9 @@ private:
+   bool m_isMarkedForGarbageCollection = false;
+ 
+   mutable RtLightAntiCullingType m_anticullingType = RtLightAntiCullingType::Ignore;
++  // NV-DXVK start: Anonymous structs with non-trivial members inside a union are an MSVC extension.
++  // Elsewhere the members are plain fields. They are used for mutually exclusive anti-culling types.
++#ifdef _MSC_VER
+   union {
+     // Mesh->Light(s) Replacement Anti-Culling
+     struct {
+@@ -698,6 +701,13 @@ private:
+       mutable float m_originalLightRadius;
+     };
+   };
++#else
++  mutable Matrix4 m_originalMeshTransform;
++  mutable AxisAlignedBoundingBox m_originalMeshBoundingBox;
++  mutable Vector3 m_originalPosition;
++  mutable float m_originalLightRadius;
++#endif
++  // NV-DXVK end
+ 
+   void copyFrom(const RtLight& light);
+ };
+diff --git a/src/dxvk/rtx_render/rtx_lights_data.cpp b/src/dxvk/rtx_render/rtx_lights_data.cpp
+index 9cc194b..c3fe631 100644
+--- a/src/dxvk/rtx_render/rtx_lights_data.cpp
++++ b/src/dxvk/rtx_render/rtx_lights_data.cpp
+@@ -31,6 +31,9 @@
+ #include <regex>
+ #include <cassert>
+ 
++// NV-DXVK start: USD is compiled out of the native Linux build
++#ifndef REMIX_NO_USD
++// NV-DXVK end
+ #include "../../lssusd/game_exporter_common.h"
+ #include "../../lssusd/game_exporter_paths.h"
+ 
+@@ -49,10 +52,16 @@
+ #include <pxr/usd/usdLux/blackbody.h>
+ #include <pxr/usd/usdLux/lightAPI.h>
+ #include "../../lssusd/usd_include_end.h"
++// NV-DXVK start: USD is compiled out of the native Linux build
++#endif
++// NV-DXVK end
+ 
+ #define WRITE_CTOR_INIT(name, usd_attr, type, minVal, maxVal, defaultVal) \
+       m_##name(defaultVal),
+ 
++// NV-DXVK start: USD is compiled out of the native Linux build
++#ifndef REMIX_NO_USD
++// NV-DXVK end
+ #define WRITE_CONSTANT_DESERIALIZER(name, usd_attr, type, minVal, maxVal, defaultVal) \
+       { \
+         pxr::VtValue val; \
+@@ -64,6 +73,9 @@
+         } \
+       }
+ 
++// NV-DXVK start: USD is compiled out of the native Linux build
++#endif
++// NV-DXVK end
+ #define WRITE_PARAMETER_MERGE(name, usd_attr, type, minVal, maxVal, defaultVal) \
+       if(!m_dirty.test(DirtyFlags::k_##name)) { \
+         m_##name = input.m_##name; \
+@@ -218,6 +230,9 @@ namespace dxvk {
+     template<>           bool hasNan(const Vector3& v)          { return hasNan(v.x) || hasNan(v.y) || hasNan(v.z); }
+     template<>           bool hasNan(const bool& v)             { return false; }
+ 
++// NV-DXVK start: USD is compiled out of the native Linux build
++#ifndef REMIX_NO_USD
++// NV-DXVK end
+     bool isUsdLightTransformValid(const pxr::GfMatrix4f& transform) {
+       // Ignore lights with a 0 scale transform on any axis
+       // Note: Currently in Omniverse lights with a 0 scale on all 3 axes are considered valid and are simply ignored. Since this is "valid" behavior and not a bug (supposedly),
+@@ -256,8 +271,14 @@ namespace dxvk {
+ 
+       return true;
+     }
++// NV-DXVK start: USD is compiled out of the native Linux build
++#endif
++// NV-DXVK end
+   } // anonymous namespace
+   
++// NV-DXVK start: USD is compiled out of the native Linux build
++#ifndef REMIX_NO_USD
++// NV-DXVK end
+   std::optional<LightData> LightData::tryCreate(const pxr::UsdPrim& lightPrim, const pxr::GfMatrix4f* pLocalToRoot, const bool isOverrideLight, const bool absoluteTransform) {
+     // Ensure the USD light is a supported type
+     if (!isSupportedUsdLight(lightPrim)) {
+@@ -286,7 +307,13 @@ namespace dxvk {
+     }
+     return l;
+   }
++// NV-DXVK start: USD is compiled out of the native Linux build
++#endif
++// NV-DXVK end
+ 
++// NV-DXVK start: USD is compiled out of the native Linux build
++#ifndef REMIX_NO_USD
++// NV-DXVK end
+   std::optional<LightData> LightData::tryCreate(const remixapi_LightInfoUSDEXT& src) {
+     LightType lightType = Unknown;
+     switch (src.lightType) {
+@@ -336,6 +363,14 @@ namespace dxvk {
+     }
+     return l;
+   }
++// NV-DXVK start: USD is compiled out of the native Linux build
++#else
++  std::optional<LightData> LightData::tryCreate(const remixapi_LightInfoUSDEXT&) {
++    Logger::warn("[RTX-Light] USD light info is not supported in the Linux build.");
++    return std::nullopt;
++  }
++#endif
++// NV-DXVK end
+ 
+   LightData::LightData(LightType lightType, bool isOverrideLight, bool absoluteTransform) :
+     LIST_LIGHT_CONSTANTS(WRITE_CTOR_INIT)
+@@ -454,6 +489,9 @@ namespace dxvk {
+   // Expanded: ^/RootNode/lights/light_[0-9A-Fa-f]{16}$
+   static const std::regex s_unknownLightPattern("^" + lss::gRootNodePath.GetAsString() + "/" + lss::gTokLights.GetString() + "/" + lss::prefix::light + "[0-9A-Fa-f]{16}$");
+ 
++// NV-DXVK start: USD is compiled out of the native Linux build
++#ifndef REMIX_NO_USD
++// NV-DXVK end
+   bool LightData::getLightType(const pxr::UsdPrim& lightPrim, LightData::LightType& typeOut) {
+     if (lightPrim.IsA<pxr::UsdLuxSphereLight>()) {
+       typeOut = LightType::Sphere;
+@@ -477,14 +515,26 @@ namespace dxvk {
+ 
+     return false;
+   }
++// NV-DXVK start: USD is compiled out of the native Linux build
++#endif
++// NV-DXVK end
+ 
++// NV-DXVK start: USD is compiled out of the native Linux build
++#ifndef REMIX_NO_USD
++// NV-DXVK end
+   bool LightData::isSupportedUsdLight(const pxr::UsdPrim& lightPrim) {
+     LightType unused;
+     return getLightType(lightPrim, unused);
+   }
++// NV-DXVK start: USD is compiled out of the native Linux build
++#endif
++// NV-DXVK end
+ 
+   // USD transitioned from `intensity` to `inputs:intensity` for all its light attributes, we need to support content
+   // authored before and after that change.
++// NV-DXVK start: USD is compiled out of the native Linux build
++#ifndef REMIX_NO_USD
++// NV-DXVK end
+   const pxr::UsdAttribute LightData::getLightAttribute(const pxr::UsdPrim& prim, const pxr::TfToken& token, const pxr::TfToken& inputToken) {
+     const pxr::UsdAttribute& attr = prim.GetAttribute(inputToken);
+     if (!attr.IsAuthored()) {
+@@ -496,13 +546,22 @@ namespace dxvk {
+     }
+     return attr;
+   }
++// NV-DXVK start: USD is compiled out of the native Linux build
++#endif
++// NV-DXVK end
+ 
+   Vector3 LightData::calculateRadiance() const {
+     Vector3 temperature(1.f);
++// NV-DXVK start: USD is compiled out of the native Linux build, and only USD lights enable color temperature
++#ifndef REMIX_NO_USD
++// NV-DXVK end
+     if (m_EnableColorTemp) {
+       const pxr::GfVec3f vec = pxr::UsdLuxBlackbodyTemperatureAsRgb(m_ColorTemp);
+       temperature = Vector3(vec.data());
+     }
++// NV-DXVK start: USD is compiled out of the native Linux build, and only USD lights enable color temperature
++#endif
++// NV-DXVK end
+     return m_Color * m_Intensity * pow(2, m_Exposure) * temperature;
+   }
+ 
+@@ -516,6 +575,9 @@ namespace dxvk {
+     return RtLightShaping(enabled, primaryAxis, cosConeAngle, coneSoftness, focusExponent);
+   }
+ 
++// NV-DXVK start: USD is compiled out of the native Linux build
++#ifndef REMIX_NO_USD
++// NV-DXVK end
+   void LightData::extractTransform(const pxr::GfMatrix4f* pLocalToRoot) {
+     // Ensure a transform exists to extract data from
+ 
+@@ -600,7 +662,13 @@ namespace dxvk {
+ 
+     m_dirty.set(DirtyFlags::k_Transform);
+   }
++// NV-DXVK start: USD is compiled out of the native Linux build
++#endif
++// NV-DXVK end
+ 
++// NV-DXVK start: USD is compiled out of the native Linux build
++#ifndef REMIX_NO_USD
++// NV-DXVK end
+   void LightData::deserialize(const pxr::UsdPrim& prim) {
+     LIST_LIGHT_CONSTANTS(WRITE_CONSTANT_DESERIALIZER);
+ 
+@@ -641,6 +709,9 @@ namespace dxvk {
+       }
+     }
+   }
++// NV-DXVK start: USD is compiled out of the native Linux build
++#endif
++// NV-DXVK end
+ 
+   void LightData::sanitizeData() {
+     LIST_LIGHT_CONSTANTS(WRITE_CONSTANT_SANITIZATION)
+diff --git a/src/dxvk/rtx_render/rtx_lights_data.h b/src/dxvk/rtx_render/rtx_lights_data.h
+index 832a241..4f2c4b3 100644
+--- a/src/dxvk/rtx_render/rtx_lights_data.h
++++ b/src/dxvk/rtx_render/rtx_lights_data.h
+@@ -53,14 +53,26 @@ struct remixapi_LightInfoUSDEXT;
+ namespace dxvk {
+   struct LightData {
+     static std::optional<LightData> tryCreate(const D3DLIGHT9& light);
++// NV-DXVK start: USD is compiled out of the native Linux build
++#ifndef REMIX_NO_USD
++// NV-DXVK end
+     static std::optional<LightData> tryCreate(const pxr::UsdPrim& lightPrim, const pxr::GfMatrix4f* pLocalToRoot, const bool isOverrideLight, const bool absoluteTransform);
++// NV-DXVK start: USD is compiled out of the native Linux build
++#endif
++// NV-DXVK end
+     static std::optional<LightData> tryCreate(const remixapi_LightInfoUSDEXT& src);
+ 
+     RtLight toRtLight() const;
+ 
+     void merge(const D3DLIGHT9& light);
+ 
++// NV-DXVK start: USD is compiled out of the native Linux build
++#ifndef REMIX_NO_USD
++// NV-DXVK end
+     static bool isSupportedUsdLight(const pxr::UsdPrim& lightPrim);
++// NV-DXVK start: USD is compiled out of the native Linux build
++#endif
++// NV-DXVK end
+ 
+     // Do we transform this light relative to a game light?
+     bool relativeTransform() const { return m_isRelativeTransform; }
+@@ -68,9 +80,15 @@ namespace dxvk {
+     // Are we overriding an existing game light?
+     bool lightOverride() const { return m_isOverrideLight; }
+ 
++// NV-DXVK start: USD is compiled out of the native Linux build
++#ifndef REMIX_NO_USD
++// NV-DXVK end
+     void setTransform(const pxr::GfMatrix4f& localToObject) {
+       extractTransform(&localToObject);
+     }
++// NV-DXVK start: USD is compiled out of the native Linux build
++#endif
++// NV-DXVK end
+ 
+   private:
+     // Supported light data types
+@@ -90,6 +108,9 @@ namespace dxvk {
+ 
+     void merge(const LightData& input);
+ 
++// NV-DXVK start: USD is compiled out of the native Linux build
++#ifndef REMIX_NO_USD
++// NV-DXVK end
+     static bool getLightType(const pxr::UsdPrim& lightPrim, LightType& typeOut);
+ 
+     // USD transitioned from `intensity` to `inputs:intensity` for all its light attributes, we need to support content
+@@ -99,6 +120,9 @@ namespace dxvk {
+     void extractTransform(const pxr::GfMatrix4f* pLocalToRoot);
+ 
+     void deserialize(const pxr::UsdPrim& prim);
++// NV-DXVK start: USD is compiled out of the native Linux build
++#endif
++// NV-DXVK end
+ 
+     void sanitizeData();
+ 
+diff --git a/src/dxvk/rtx_render/rtx_material_data.h b/src/dxvk/rtx_render/rtx_material_data.h
+index bcfa8d3..c7d8afe 100644
+--- a/src/dxvk/rtx_render/rtx_material_data.h
++++ b/src/dxvk/rtx_render/rtx_material_data.h
+@@ -23,11 +23,17 @@
+ 
+ #include "../../lssusd/mdl_helpers.h"
+ 
++// NV-DXVK start: USD is compiled out of the native Linux build
++#ifndef REMIX_NO_USD
++// NV-DXVK end
+ #include "../../lssusd/usd_include_begin.h"
+ #include <pxr/base/vt/value.h>
+ #include <pxr/usd/usd/tokens.h>
+ #include <pxr/usd/usd/prim.h>
+ #include "../../lssusd/usd_include_end.h"
++// NV-DXVK start: USD is compiled out of the native Linux build
++#endif
++// NV-DXVK end
+ 
+ // Note: These material ranges and defaults should be kept in sync with the MDL ranges to prevent mismatching between how data is clamped.
+ 
+@@ -170,6 +176,27 @@
+   LIST_PORTAL_MATERIAL_CONSTANTS(X)
+ // clang-format on
+ 
++// NV-DXVK start: USD tokens and deserialization only exist when USD is built in
++#ifndef REMIX_NO_USD
++#define REMIX_MATERIAL_USD_TOKEN(name, usd_attr) \
++      static pxr::TfToken get##name##Token() { return pxr::TfToken("inputs:"#usd_attr); }
++#define REMIX_MATERIAL_USD_DESERIALIZE(name, X_CONSTANTS, X_TEXTURES)                                \
++  template<typename F>                                                                               \
++  static name##Data deserialize(const F& getTexture, const pxr::UsdPrim& shader) {                   \
++    name##Data target;                                                                               \
++    X_CONSTANTS(WRITE_CONSTANT_DESERIALIZER)                                                         \
++    X_TEXTURES(WRITE_TEXTURE_DESERIALIZER)                                                           \
++    target.sanitizeData();                                                                           \
++    /* Note: Called after data is sanitized to have the hashed value reflect the adjusted values. */ \
++    target.updateCachedHash();                                                                       \
++    return target;                                                                                   \
++  }
++#else
++#define REMIX_MATERIAL_USD_TOKEN(name, usd_attr)
++#define REMIX_MATERIAL_USD_DESERIALIZE(name, X_CONSTANTS, X_TEXTURES)
++#endif
++// NV-DXVK end
++
+ #define WRITE_CTOR_ARGS(name, usd_attr, type, minVal, maxVal, defaultVal) \
+       const type& name,
+ 
+@@ -180,13 +207,13 @@
+       type& get##name() { return m_##name; } \
+       const type& get##name() const { return m_##name; } \
+       void set##name(const type value) { m_##name = value; m_dirty.set(DirtyFlags::k_##name); sanitizeData(); updateCachedHash(); } \
+-      static pxr::TfToken get##name##Token() { return pxr::TfToken("inputs:"#usd_attr); }
++      REMIX_MATERIAL_USD_TOKEN(name, usd_attr)
+ 
+ #define WRITE_TEXTURE_MEMBER_FUNC(name, usd_attr, type, minVal, maxVal, defaultVal) \
+       type& get##name() { return m_##name; } \
+       const type& get##name() const { return m_##name; } \
+       void set##name(const type value) { m_##name = value; m_dirty.set(DirtyFlags::k_##name); sanitizeData(); updateCachedHash(); } \
+-      static pxr::TfToken get##name##Token() { return pxr::TfToken("inputs:"#usd_attr); }
++      REMIX_MATERIAL_USD_TOKEN(name, usd_attr)
+ 
+ #define WRITE_CONSTANT_DESERIALIZER(name, usd_attr, type, minVal, maxVal, defaultVal) \
+       if(shader.HasAttribute(get##name##Token())) { \
+@@ -250,16 +277,8 @@ struct name##Data {
+   X_CONSTANTS(WRITE_CONSTANT_MEMBER_FUNC)                                                            \
+   X_TEXTURES(WRITE_TEXTURE_MEMBER_FUNC)                                                              \
+                                                                                                      \
+-  template<typename F>                                                                               \
+-  static name##Data deserialize(const F& getTexture, const pxr::UsdPrim& shader) {                   \
+-    name##Data target;                                                                               \
+-    X_CONSTANTS(WRITE_CONSTANT_DESERIALIZER)                                                         \
+-    X_TEXTURES(WRITE_TEXTURE_DESERIALIZER)                                                           \
+-    target.sanitizeData();                                                                           \
+-    /* Note: Called after data is sanitized to have the hashed value reflect the adjusted values. */ \
+-    target.updateCachedHash();                                                                       \
+-    return target;                                                                                   \
+-  }                                                                                                  \
++  /* NV-DXVK: USD deserialization is compiled out on Linux */                                      \
++  REMIX_MATERIAL_USD_DESERIALIZE(name, X_CONSTANTS, X_TEXTURES)                                      \
+                                                                                                      \
+   void merge(const name##Data& input)  {                                                             \
+     X_PARAMS(WRITE_PARAMETER_MERGE)                                                                  \
+diff --git a/src/dxvk/rtx_render/rtx_matrix_helpers.h b/src/dxvk/rtx_render/rtx_matrix_helpers.h
+index 0f09d90..34bbed7 100644
+--- a/src/dxvk/rtx_render/rtx_matrix_helpers.h
++++ b/src/dxvk/rtx_render/rtx_matrix_helpers.h
+@@ -24,9 +24,15 @@
+ #include "MathLib/MathLib.h"
+ #include "../util/util_matrix.h"
+ 
++// NV-DXVK start: USD is compiled out of the native Linux build
++#ifndef REMIX_NO_USD
++// NV-DXVK end
+ #include "../../lssusd/usd_include_begin.h"
+ #include <pxr/base/arch/math.h>
+ #include "../../lssusd/usd_include_end.h"
++// NV-DXVK start: USD is compiled out of the native Linux build
++#endif
++// NV-DXVK end
+ 
+ static inline void copyDxvkMatrix4ToDouble4x4(const dxvk::Matrix4& src, double dest[][4]) {
+   for (int i = 0; i < 4; i++) {
+diff --git a/src/dxvk/rtx_render/rtx_ngx_wrapper.cpp b/src/dxvk/rtx_render/rtx_ngx_wrapper.cpp
+index ce2df8f..b68b5d0 100644
+--- a/src/dxvk/rtx_render/rtx_ngx_wrapper.cpp
++++ b/src/dxvk/rtx_render/rtx_ngx_wrapper.cpp
+@@ -50,8 +50,12 @@
+ #include <nvsdk_ngx_helpers_dlssg_vk.h>
+ #include <nvsdk_ngx_defs_dlssg.h>
+ 
++// NV-DXVK start: DLSS-NR headers ship only in the Windows NGX package
++#ifndef REMIX_NO_DLSSNR
+ #include <nvsdk_ngx_defs_dlssnr.h>
+ #include <nvsdk_ngx_helpers_dlssnr_vk.h>
++#endif
++// NV-DXVK end
+ 
+ #include "rtx_resources.h"
+ #include "rtx_semaphore.h"
+@@ -78,6 +82,10 @@ namespace dxvk
+     NVSDK_NGX_Result queryDlssNeuralRenderingVramAllocation(
+         NVSDK_NGX_Parameter* pParameters,
+         unsigned long long* pVramAllocationBytes) {
++#ifdef REMIX_NO_DLSSNR
++    // NV-DXVK: DLSS-NR is unavailable in this build.
++      return NVSDK_NGX_Result_FAIL_FeatureNotSupported;
++#else
+       // Invoke the stats callback directly to avoid the generic helper's D3D header dependency.
+       void* pCallback = nullptr;
+       NVSDK_NGX_Result result = NVSDK_NGX_Parameter_GetVoidPointer(
+@@ -97,7 +105,8 @@ namespace dxvk
+       }
+ 
+       return NVSDK_NGX_Parameter_GetULL(pParameters, NVSDK_NGX_Parameter_SizeInBytes, pVramAllocationBytes);
+-    }
++#endif
++  }
+ 
+     std::string resultToString(NVSDK_NGX_Result result) {
+       char buf[1024];
+@@ -409,6 +418,11 @@ namespace dxvk
+   }
+ 
+   bool NGXContext::checkDlssNeuralRenderingSupport(NVSDK_NGX_Parameter* params) {
++#ifdef REMIX_NO_DLSSNR
++    // NV-DXVK: DLSS-NR is unavailable in this build.
++    Logger::info("NVIDIA DLSS-NR is not available in the Linux build.");
++    return false;
++#else
+     int needsUpdatedDriver = 0;
+     NVSDK_NGX_Result result = params->Get(NVSDK_NGX_Parameter_DLSSNR_NeedsUpdatedDriver, &needsUpdatedDriver);
+     if (NVSDK_NGX_FAILED(result)) {
+@@ -444,6 +458,7 @@ namespace dxvk
+     }
+ 
+     return true;
++#endif
+   }
+ 
+   static bool checkHardwareSchedulingEnabled(DxvkDevice* device) {
+@@ -1075,6 +1090,11 @@ namespace dxvk
+   }
+ 
+   void NGXNeuralRenderingContext::initialize(Rc<DxvkContext> renderContext, const uint32_t displaySize[2], bool queryVramAllocation) {
++#ifdef REMIX_NO_DLSSNR
++    // NV-DXVK: DLSS-NR is unavailable in this build.
++    m_initialized = false;
++    return;
++#else
+     if (m_neuralRenderingFeature) {
+       renderContext->getDevice()->waitForIdle();
+     }
+@@ -1112,10 +1132,15 @@ namespace dxvk
+     }
+ 
+     m_initialized = true;
++#endif
+   }
+ 
+   bool NGXNeuralRenderingContext::evaluateNeuralRendering(
+     Rc<DxvkContext> renderContext, const NGXNeuralRenderingBuffers& buffers, const NGXNeuralRenderingSettings& settings) const {
++#ifdef REMIX_NO_DLSSNR
++    // NV-DXVK: DLSS-NR is unavailable in this build.
++    return false;
++#else
+     if (!isNeuralRenderingInitialized()) {
+       return false;
+     }
+@@ -1182,6 +1207,7 @@ namespace dxvk
+     }
+ 
+     return true;
++#endif
+   }
+ 
+   void NGXNeuralRenderingContext::releaseNGXFeature() {
+diff --git a/src/dxvk/rtx_render/rtx_ngx_wrapper.h b/src/dxvk/rtx_render/rtx_ngx_wrapper.h
+index 8e4e992..ab10524 100644
+--- a/src/dxvk/rtx_render/rtx_ngx_wrapper.h
++++ b/src/dxvk/rtx_render/rtx_ngx_wrapper.h
+@@ -28,8 +28,12 @@
+ #include <nvsdk_ngx_defs.h>
+ #include <nvsdk_ngx_defs_dlssd.h>
+ #include <nvsdk_ngx_defs_dlssg.h>
++// NV-DXVK start: DLSS-NR headers ship only in the Windows NGX package
++#ifndef REMIX_NO_DLSSNR
+ #include <nvsdk_ngx_defs_dlssnr.h>
+ #endif
++// NV-DXVK end
++#endif
+ 
+ #include <cstdint>
+ #include <memory>
+diff --git a/src/dxvk/rtx_render/rtx_option.h b/src/dxvk/rtx_render/rtx_option.h
+index 556e56d..51eea16 100644
+--- a/src/dxvk/rtx_render/rtx_option.h
++++ b/src/dxvk/rtx_render/rtx_option.h
+@@ -429,7 +429,7 @@ namespace dxvk {
+     // Add a hash to a hash set option in a specific layer.
+     // This layer will contribute this hash to the resolved set.
+     // If layer is nullptr, uses the current target layer from RtxOptionLayerTarget.
+-    template<typename = std::enable_if_t<std::is_same_v<T, fast_unordered_set>>>
++    template<typename U = T, typename = std::enable_if_t<std::is_same_v<U, fast_unordered_set>>> // NV-DXVK: dependent SFINAE for GCC/Clang
+     void addHash(const XXH64_hash_t& value, const RtxOptionLayer* layer = nullptr) {
+       std::lock_guard<std::mutex> lock(RtxOptionImpl::getUpdateMutex());
+       
+@@ -451,7 +451,7 @@ namespace dxvk {
+     // Remove a hash from a hash set option in a specific layer.
+     // This layer will exclude this hash from the resolved set, overriding lower priority layers.
+     // If layer is nullptr, uses the current target layer from RtxOptionLayerTarget.
+-    template<typename = std::enable_if_t<std::is_same_v<T, fast_unordered_set>>>
++    template<typename U = T, typename = std::enable_if_t<std::is_same_v<U, fast_unordered_set>>> // NV-DXVK: dependent SFINAE for GCC/Clang
+     void removeHash(const XXH64_hash_t& value, const RtxOptionLayer* layer = nullptr) {
+       std::lock_guard<std::mutex> lock(RtxOptionImpl::getUpdateMutex());
+       
+@@ -473,7 +473,7 @@ namespace dxvk {
+     // Clear any opinion about a hash from a specific layer.
+     // The hash will be neither added nor removed by this layer.
+     // If layer is nullptr, uses the current target layer from RtxOptionLayerTarget.
+-    template<typename = std::enable_if_t<std::is_same_v<T, fast_unordered_set>>>
++    template<typename U = T, typename = std::enable_if_t<std::is_same_v<U, fast_unordered_set>>> // NV-DXVK: dependent SFINAE for GCC/Clang
+     void clearHash(const XXH64_hash_t& value, const RtxOptionLayer* layer = nullptr) {
+       std::lock_guard<std::mutex> lock(RtxOptionImpl::getUpdateMutex());
+       
+@@ -498,7 +498,7 @@ namespace dxvk {
+       markDirty();
+     }
+ 
+-    template<typename = std::enable_if_t<std::is_same_v<T, fast_unordered_set>>>
++    template<typename U = T, typename = std::enable_if_t<std::is_same_v<U, fast_unordered_set>>> // NV-DXVK: dependent SFINAE for GCC/Clang
+     bool containsHash(const XXH64_hash_t& value) const {
+       std::lock_guard<std::mutex> lock(RtxOptionImpl::getUpdateMutex());
+       tagInvalidationScope();
+@@ -561,7 +561,7 @@ namespace dxvk {
+       return OptionType::Int;
+     }
+ 
+-    template<typename = std::enable_if_t<isClampable()>>
++    template<typename U = T, typename = std::enable_if_t<std::is_same_v<U, T> && isClampable()>> // NV-DXVK: dependent SFINAE for GCC/Clang
+     void setMinValue(const T& v) {
+       std::lock_guard<std::mutex> lock(RtxOptionImpl::getUpdateMutex());
+       
+@@ -571,13 +571,13 @@ namespace dxvk {
+       }
+     }
+ 
+-    template<typename = std::enable_if_t<isClampable()>>
++    template<typename U = T, typename = std::enable_if_t<std::is_same_v<U, T> && isClampable()>> // NV-DXVK: dependent SFINAE for GCC/Clang
+     std::optional<T> getMinValue() const {
+       std::lock_guard<std::mutex> lock(RtxOptionImpl::getUpdateMutex());
+       return getMinMaxValueHelper(minValue);
+     }
+ 
+-    template<typename = std::enable_if_t<isClampable()>>
++    template<typename U = T, typename = std::enable_if_t<std::is_same_v<U, T> && isClampable()>> // NV-DXVK: dependent SFINAE for GCC/Clang
+     void setMaxValue(const T& v) {
+       std::lock_guard<std::mutex> lock(RtxOptionImpl::getUpdateMutex());
+       bool changed = setMinMaxValueHelper(v, maxValue);
+@@ -586,7 +586,7 @@ namespace dxvk {
+       }
+     }
+ 
+-    template<typename = std::enable_if_t<isClampable()>>
++    template<typename U = T, typename = std::enable_if_t<std::is_same_v<U, T> && isClampable()>> // NV-DXVK: dependent SFINAE for GCC/Clang
+     std::optional<T> getMaxValue() const {
+       std::lock_guard<std::mutex> lock(RtxOptionImpl::getUpdateMutex());
+       return getMinMaxValueHelper(maxValue);
+@@ -595,7 +595,13 @@ namespace dxvk {
+   private:
+     // Prevent `new RtxOption` from being used.  Use the RTX_OPTION macro to create RtxOptions.
+     static void* operator new(size_t size) = delete;
++    // NV-DXVK start: GCC and Clang need a usable operator delete for the virtual destructor, so it stays private instead
++#ifdef _MSC_VER
+     static void operator delete(void* ptr) = delete;
++#else
++    static void operator delete(void* ptr) { ::operator delete(ptr); }
++#endif
++    // NV-DXVK end
+ 
+     // Prevent `new RtxOption[N]` from being used.  Use the RTX_OPTION macro to create RtxOptions.
+     static void* operator new[](size_t size) = delete;
+diff --git a/src/dxvk/rtx_render/rtx_options.h b/src/dxvk/rtx_render/rtx_options.h
+index 56a052b..86846d8 100644
+--- a/src/dxvk/rtx_render/rtx_options.h
++++ b/src/dxvk/rtx_render/rtx_options.h
+@@ -51,10 +51,16 @@
+ #include "rtx_hashing.h"
+ #include "rtx_mod_manager.h"
+ 
++// NV-DXVK start: Opaque enum declarations without an underlying type are an MSVC extension
++#ifdef _MSC_VER
+ enum _NV_GPU_ARCHITECTURE_ID;
+ typedef enum _NV_GPU_ARCHITECTURE_ID NV_GPU_ARCHITECTURE_ID;
+ enum _NV_GPU_ARCH_IMPLEMENTATION_ID;
+ typedef enum _NV_GPU_ARCH_IMPLEMENTATION_ID NV_GPU_ARCH_IMPLEMENTATION_ID;
++#else
++#include <nvapi.h>
++#endif
++// NV-DXVK end
+ 
+ // RTX specific options
+ 
+diff --git a/src/dxvk/shaders/rtx/pass/particles/particle_system_common.h b/src/dxvk/shaders/rtx/pass/particles/particle_system_common.h
+index db55bb1..f9884c3 100644
+--- a/src/dxvk/shaders/rtx/pass/particles/particle_system_common.h
++++ b/src/dxvk/shaders/rtx/pass/particles/particle_system_common.h
+@@ -129,7 +129,7 @@ struct RtxParticleSystemDesc : GpuParticleSystemDesc {
+   RtxParticleSystemDesc() 
+     : GpuParticleSystemDesc{}
+   {
+-    attractorPosition = {0.0f, 0.0f, 0.0f};
++    attractorPosition = vec3(0.0f, 0.0f, 0.0f); // NV-DXVK: brace assignment is ambiguous on GCC
+     attractorForce = 0.0f;
+     minTimeToLive = 0.0f;
+     maxTimeToLive = 0.0f;
+-- 
+2.43.0
+
