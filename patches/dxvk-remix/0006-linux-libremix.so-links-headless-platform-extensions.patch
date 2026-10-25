@@ -1,0 +1,313 @@
+From 50c58ef6884bba0dc5fcb4815c4389c6603e52d4 Mon Sep 17 00:00:00 2001
+From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
+Date: Sun, 25 Oct 2026 23:24:31 +0000
+Subject: [PATCH 6/6] linux: libremix.so links; headless platform extensions,
+ export map, stubs
+
+- libremix.so links on Linux x86_64 and exports only remixapi_* and
+  remixinternal_* (linux/remix.map).
+- Headless platform extension provider: VK_KHR_win32_surface is no longer
+  requested on Linux, which would fail instance creation.
+- XeSS SDK stubs, USD mod and capture UI stubs, SetProcessDPIAware.
+- Explicit instantiation of DxvkContext::commitGraphicsState.
+- remix_c.h includes stddef.h for wchar_t in C on non-Windows.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Tb41TgDi74v7sgH5LJBZ5A
+Signed-off-by: Claude (for Kush) <kushisthecoolest@gmail.com>
+---
+ linux/remix.map                   |  9 ++++
+ linux/src/dxvk_headless_exts.cpp  | 47 +++++++++++++++++++++
+ linux/src/remix_usd_stubs.cpp     | 58 ++++++++++++++++++++++++++
+ linux/stubs/remix_linux_stubs.cpp | 68 +++++++++++++++++++++++++++++++
+ public/include/remix/remix_c.h    |  1 +
+ src/d3d9/meson.build              |  2 +
+ src/dxvk/dxvk_context.cpp         |  7 ++++
+ src/dxvk/meson.build              |  3 ++
+ 8 files changed, 195 insertions(+)
+ create mode 100644 linux/remix.map
+ create mode 100644 linux/src/dxvk_headless_exts.cpp
+ create mode 100644 linux/src/remix_usd_stubs.cpp
+
+diff --git a/linux/remix.map b/linux/remix.map
+new file mode 100644
+index 0000000..29a7cc0
+--- /dev/null
++++ b/linux/remix.map
+@@ -0,0 +1,9 @@
++/* Exported symbols of libremix.so. Everything else, including the statically linked libstdc++, stays local
++   so it cannot interpose on other libraries in the host process (for example the JVM). */
++{
++  global:
++    remixapi_*;
++    remixinternal_*;
++  local:
++    *;
++};
+diff --git a/linux/src/dxvk_headless_exts.cpp b/linux/src/dxvk_headless_exts.cpp
+new file mode 100644
+index 0000000..7ab0e83
+--- /dev/null
++++ b/linux/src/dxvk_headless_exts.cpp
+@@ -0,0 +1,47 @@
++/*
++* Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
++*
++* Permission is hereby granted, free of charge, to any person obtaining a
++* copy of this software and associated documentation files (the "Software"),
++* to deal in the Software without restriction, including without limitation
++* the rights to use, copy, modify, merge, publish, distribute, sublicense,
++* and/or sell copies of the Software, and to permit persons to whom the
++* Software is furnished to do so, subject to the following conditions:
++*
++* The above copyright notice and this permission notice shall be included in
++* all copies or substantial portions of the Software.
++*
++* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++* THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++* FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++* DEALINGS IN THE SOFTWARE.
++*/
++
++// Platform extension provider for the headless Linux runtime, replacing platform/dxvk_win32_exts.cpp.
++// The runtime never creates a window surface, so it requests no WSI platform extension.
++// VK_KHR_win32_surface in particular does not exist on Linux and would fail instance creation.
++
++#include "../../src/dxvk/dxvk_platform_exts.h"
++
++namespace dxvk {
++  DxvkPlatformExts DxvkPlatformExts::s_instance;
++
++  std::string_view DxvkPlatformExts::getName() {
++    return "Headless (Linux)";
++  }
++
++  DxvkNameSet DxvkPlatformExts::getInstanceExtensions() {
++    return DxvkNameSet();
++  }
++
++  DxvkNameSet DxvkPlatformExts::getDeviceExtensions(uint32_t) {
++    return DxvkNameSet();
++  }
++
++  void DxvkPlatformExts::initInstanceExtensions() { }
++
++  void DxvkPlatformExts::initDeviceExtensions(const DxvkInstance*) { }
++}
+diff --git a/linux/src/remix_usd_stubs.cpp b/linux/src/remix_usd_stubs.cpp
+new file mode 100644
+index 0000000..7539297
+--- /dev/null
++++ b/linux/src/remix_usd_stubs.cpp
+@@ -0,0 +1,58 @@
++/*
++* Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
++*
++* Permission is hereby granted, free of charge, to any person obtaining a
++* copy of this software and associated documentation files (the "Software"),
++* to deal in the Software without restriction, including without limitation
++* the rights to use, copy, modify, merge, publish, distribute, sublicense,
++* and/or sell copies of the Software, and to permit persons to whom the
++* Software is furnished to do so, subject to the following conditions:
++*
++* The above copyright notice and this permission notice shall be included in
++* all copies or substantial portions of the Software.
++*
++* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++* THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++* FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++* DEALINGS IN THE SOFTWARE.
++*/
++
++// Replacements for the USD-based implementation files the native Linux build compiles out
++// (rtx_mod_usd.cpp, rtx_game_capturer.cpp, rtx_graph_usd_parser.cpp, dxvk_imgui_capture.cpp).
++// USD mods are never discovered, and the capture menu reports that capture is unavailable.
++
++#include "../../src/dxvk/rtx_render/rtx_mod_usd.h"
++#include "../../src/dxvk/imgui/dxvk_imgui_capture.h"
++#include "../../src/dxvk/imgui/imgui.h"
++
++namespace dxvk {
++  namespace {
++    struct NoUsdModTypeInfo final : public ModTypeInfo {
++      std::unique_ptr<Mod> construct(const Mod::Path&) const override {
++        return nullptr;
++      }
++
++      bool isValidMod(const Mod::Path&) const override {
++        return false;
++      }
++    };
++  }
++
++  const ModTypeInfo& UsdMod::getTypeInfo() {
++    static NoUsdModTypeInfo s_typeInfo;
++    return s_typeInfo;
++  }
++
++  void ImGuiCapture::update(const Rc<DxvkContext>&) { }
++
++  void ImGuiCapture::show(const Rc<DxvkContext>&) {
++    ImGui::TextDisabled("USD scene capture is not available in the Linux build.");
++  }
++
++  ImGuiCapture::StageNameInputBox::StageNameInputBox() {
++    m_buf[0] = '\0';
++  }
++}
+diff --git a/linux/stubs/remix_linux_stubs.cpp b/linux/stubs/remix_linux_stubs.cpp
+index 1ea9610..c0da017 100644
+--- a/linux/stubs/remix_linux_stubs.cpp
++++ b/linux/stubs/remix_linux_stubs.cpp
+@@ -28,6 +28,9 @@
+ 
+ #include <NrcVk.h>
+ #include <nvapi.h>
++#include <xess/xess.h>
++#include <xess/xess_vk.h>
++#include <xess/xess_debug.h>
+ 
+ // Neural Radiance Cache (submodules/nrc ships Windows binaries only).
+ namespace nrc {
+@@ -149,3 +152,68 @@ extern "C" {
+     return NVAPI_API_NOT_INITIALIZED;
+   }
+ }
++
++// Intel XeSS ships Windows libraries only. Context creation fails, so the upscaler is unavailable.
++extern "C" {
++  xess_result_t xessGetVersion(xess_version_t* pVersion) {
++    if (pVersion) {
++      *pVersion = xess_version_t {};
++    }
++    return XESS_RESULT_ERROR_UNSUPPORTED;
++  }
++
++  xess_result_t xessVKCreateContext(VkInstance, VkPhysicalDevice, VkDevice, xess_context_handle_t* phContext) {
++    if (phContext) {
++      *phContext = nullptr;
++    }
++    return XESS_RESULT_ERROR_UNSUPPORTED_DEVICE;
++  }
++
++  xess_result_t xessVKBuildPipelines(xess_context_handle_t, VkPipelineCache, bool, uint32_t) {
++    return XESS_RESULT_ERROR_UNSUPPORTED;
++  }
++
++  xess_result_t xessVKInit(xess_context_handle_t, const xess_vk_init_params_t*) {
++    return XESS_RESULT_ERROR_UNSUPPORTED;
++  }
++
++  xess_result_t xessVKExecute(xess_context_handle_t, VkCommandBuffer, const xess_vk_execute_params_t*) {
++    return XESS_RESULT_ERROR_UNSUPPORTED;
++  }
++
++  xess_result_t xessGetOptimalInputResolution(xess_context_handle_t, const xess_2d_t*, xess_quality_settings_t,
++                                              xess_2d_t*, xess_2d_t*, xess_2d_t*) {
++    return XESS_RESULT_ERROR_UNSUPPORTED;
++  }
++
++  xess_result_t xessGetJitterScale(xess_context_handle_t, float* pX, float* pY) {
++    if (pX) {
++      *pX = 1.0f;
++    }
++    if (pY) {
++      *pY = 1.0f;
++    }
++    return XESS_RESULT_ERROR_UNSUPPORTED;
++  }
++
++  xess_result_t xessDestroyContext(xess_context_handle_t) {
++    return XESS_RESULT_ERROR_UNSUPPORTED;
++  }
++
++  xess_result_t xessSetMaxResponsiveMaskValue(xess_context_handle_t, float) {
++    return XESS_RESULT_ERROR_UNSUPPORTED;
++  }
++
++  xess_result_t xessIsOptimalDriver(xess_context_handle_t) {
++    return XESS_RESULT_ERROR_UNSUPPORTED;
++  }
++
++  xess_result_t xessSelectNetworkModel(xess_context_handle_t, xess_network_model_t) {
++    return XESS_RESULT_ERROR_UNSUPPORTED;
++  }
++
++  // Declared in src/d3d9/d3d9_include.h. DPI awareness is a Win32 process setting.
++  WINBOOL SetProcessDPIAware(void) {
++    return TRUE;
++  }
++}
+diff --git a/public/include/remix/remix_c.h b/public/include/remix/remix_c.h
+index 5575d42..33b5786 100644
+--- a/public/include/remix/remix_c.h
++++ b/public/include/remix/remix_c.h
+@@ -29,6 +29,7 @@
+ // default-visibility exports and the platform calling convention.
+ #if !defined(_WIN32)
+   #define REMIX_NATIVE_POSIX 1
++  #include <stddef.h> // wchar_t in C
+   #ifndef REMIX_WINAPI_NO_INCLUDE
+     #define REMIX_WINAPI_NO_INCLUDE
+   #endif
+diff --git a/src/d3d9/meson.build b/src/d3d9/meson.build
+index bd3eac6..72d74b6 100644
+--- a/src/d3d9/meson.build
++++ b/src/d3d9/meson.build
+@@ -104,6 +104,8 @@ endif
+ if dxvk_is_linux
+   d3d9_impl_dll = shared_library('remix', d3d9_src, dxvk_version, glsl_generator.process(d3d9_shaders),
+     link_with           : [ util_lib ],
++    link_args           : [ '-Wl,--version-script=' + join_paths(global_src_root_norm, 'linux/remix.map') ],
++    link_depends        : [ join_paths(global_src_root_norm, 'linux/remix.map') ],
+     dependencies        : [ dxso_dep, dxvk_dep, util_dep, lib_vulkan, lib_dl ],
+     include_directories : [ dxvk_include_path, dxvk_shader_include_path, remix_api_include_path ],
+     override_options    : ['cpp_std='+dxvk_cpp_std],
+diff --git a/src/dxvk/dxvk_context.cpp b/src/dxvk/dxvk_context.cpp
+index 28f615e..edcec57 100644
+--- a/src/dxvk/dxvk_context.cpp
++++ b/src/dxvk/dxvk_context.cpp
+@@ -5535,6 +5535,13 @@ namespace dxvk {
+     return true;
+   }
+ 
++  // NV-DXVK start: RtxContext uses these from another translation unit, and GCC does not emit an implicit instantiation for it
++  template bool DxvkContext::commitGraphicsState<false, false>();
++  template bool DxvkContext::commitGraphicsState<false, true>();
++  template bool DxvkContext::commitGraphicsState<true, false>();
++  template bool DxvkContext::commitGraphicsState<true, true>();
++  // NV-DXVK end
++
+   // NV-DXVK start: Split out common post barriers logic
+   void DxvkContext::commitPostBarriers(const DxvkDescriptorSlot binding, VkPipelineStageFlags stages) {
+     ScopedCpuProfileZone();
+diff --git a/src/dxvk/meson.build b/src/dxvk/meson.build
+index a7b3921..43afe15 100644
+--- a/src/dxvk/meson.build
++++ b/src/dxvk/meson.build
+@@ -463,6 +463,7 @@ if dxvk_is_linux
+     'rtx_render/rtx_file_watch.cpp',
+     'imgui/imgui_impl_win32.cpp',
+     'rtx_render/rtx_overlay_window.cpp',
++    'platform/dxvk_win32_exts.cpp',
+   ]
+   dxvk_src_filtered = []
+   foreach f : dxvk_src
+@@ -481,6 +482,8 @@ if dxvk_is_linux
+     '../../linux/src/rtx_reflex_linux.cpp',
+     '../../linux/src/rtx_file_watch_linux.cpp',
+     '../../linux/src/imgui_impl_linux.cpp',
++    '../../linux/src/remix_usd_stubs.cpp',
++    '../../linux/src/dxvk_headless_exts.cpp',
+   ])
+ endif
+ # NV-DXVK end
+-- 
+2.43.0
+

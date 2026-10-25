@@ -12,6 +12,7 @@ s = s.replace(old, old + '''
 // default-visibility exports and the platform calling convention.
 #if !defined(_WIN32)
   #define REMIX_NATIVE_POSIX 1
+  #include <stddef.h> // wchar_t in C
   #ifndef REMIX_WINAPI_NO_INCLUDE
     #define REMIX_WINAPI_NO_INCLUDE
   #endif

@@ -1,7 +1,7 @@
 From fee2862c34471aedd7476e9cbe97b7ec7ce6cdaa Mon Sep 17 00:00:00 2001
 From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
 Date: Sun, 25 Oct 2026 21:49:20 +0000
-Subject: [PATCH 1/5] linux: native Linux meson build and util/vulkan compat
+Subject: [PATCH 1/6] linux: native Linux meson build and util/vulkan compat
  layer
 
 Adds a self-contained Linux branch to the root meson.build (Windows path

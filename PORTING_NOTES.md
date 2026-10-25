@@ -190,3 +190,50 @@ public source; DXVK `include/native` headers; headless runtime with `skipVulkanS
     - Remix's ImGui menus get input from Win32 messages. On Linux the mod must forward input.
     - `Startup` sizes the device from `GetClientRect(hwnd)`. On Linux that is a client size the
       mod reports (`remix_linux::setHeadlessClientSize`).
+
+---
+
+## Phase B gate: PASSED (compiles and links)
+
+**`libremix.so` compiles and links natively on Linux x86_64** (Ubuntu 24.04 build container, GCC 13.3,
+meson 1.12, slang v2025.10.4 plus patches, glslang 15.1, SPIRV-Tools 2025.1).
+
+| Check | Result |
+|---|---|
+| All 584 RTX shader variants compile and pass `spirv-val` | yes |
+| All C++ in util/spirv/vulkan/dxvk/dxso/d3d9 plus the `linux/` sources compiles | yes |
+| `libremix.so` links (`-Wl,--no-undefined`) | yes. 318 MB, mostly embedded SPIR-V. Not stripped, no `-g` |
+| `NEEDED` | only `libvulkan.so.1`, `libm`, `libc`, `ld-linux`. libstdc++/libgcc are static |
+| Exported symbols | exactly `remixapi_InitializeLibrary` and 3 `remixinternal_*` (version script) |
+| `tests/load_remix.c`: dlopen + `remixapi_InitializeLibrary(0.6.6)` | SUCCESS, 22/22 interface entries non-null |
+| `tests/startup_remix.c` with no Vulkan driver | `Startup` returns `0x88960003` (instance extension failure) cleanly |
+| `tests/startup_remix.c` on Mesa lavapipe (software Vulkan with KHR ray tracing) | gets through instance, adapter and device creation, NGX init (reports unsupported), and NRD load (missing, disabled). Then fails, as designed, at presenter surface creation (`evidence/phaseB-startup-lavapipe.log`) |
+| **Verified on GPU** | **no**. Nothing has run on an NVIDIA GPU |
+
+### Dependencies: built, stubbed, dropped
+| Component | Linux status |
+|---|---|
+| slang | Built from source, v2025.10.4 + upstream #7448 and #7398 cherry-picks + a `-zero-initialize` parse fix. Remix's pin is NVIDIA-internal (`-39-g496fab196-remix`). The cherry-picks fixed the only shader failures seen. Other NVIDIA patches may exist and may affect rendering. |
+| NRD 4.13.0 | Headers and shader includes used. **`libNRD.so` is not built yet.** The runtime disables NRD when it is missing. Building it needs MathLib, ShaderMake and DXC: **decision needed**. |
+| DLSS SR / RR | Linked against `libnvsdk_ngx.a` (Linux). The runtime libraries are `libnvidia-ngx-dlss.so` / `-dlssd.so` from the submodule. NGX init ran on lavapipe and reported unsupported. **Untested on NVIDIA.** |
+| DLSS-FG (DLFG), DLSS-NR | FG is left in (frame generation is out of scope). NR is compiled out because its headers are missing. |
+| USD, game capture, USD mods | compiled out (approved) |
+| NRC, XeSS, NVAPI | stubbed as "unsupported", using the SDK headers' own declarations |
+| Reflex, Aftermath, Sentry, RTX IO, Nsight | compiled out or no-op |
+| OpenVR/OpenXR | inert (registry stubs fail, so VR stays off) |
+| Window, cursor, monitor, GDI, file watch | headless replacements |
+
+### Bugs found and fixed that compile and link alone would not show
+- Ray-tracing device extensions were gated on `_WIN64`.
+- The platform provider requested `VK_KHR_win32_surface`, which would fail `vkCreateInstance` on Linux.
+- Without RTX IO, the async texture loader thread never started.
+- `remix_c.h` was not usable from C on non-Windows (`wchar_t`).
+
+### Known open items carried into Phase C
+- **Presenter:** `Startup` still creates a D3D9 swapchain and presenter. The headless path must skip
+  surface creation entirely (part of the interop/`skipVulkanSwapchain` work).
+- **Client size:** `GetClientRect` reports a size set via `remix_linux::setHeadlessClientSize`.
+  The API needs a way for the mod to set it.
+- **ImGui input:** the Remix menus need input forwarded from the mod (GLFW).
+- `libNRD.so` (decision above).
+- Linux has no share-deny file locks, so a texture another process is still writing is not detected.

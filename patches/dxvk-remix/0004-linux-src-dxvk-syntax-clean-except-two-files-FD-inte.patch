@@ -1,7 +1,7 @@
 From 9e83aba8820cab70b2c707474103534b8e4752cc Mon Sep 17 00:00:00 2001
 From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
 Date: Sun, 25 Oct 2026 22:55:29 +0000
-Subject: [PATCH 4/5] linux: src/dxvk syntax-clean except two files; FD interop
+Subject: [PATCH 4/6] linux: src/dxvk syntax-clean except two files; FD interop
  export
 
 - FD external memory/semaphore export and import (VK_KHR_external_*_fd),
