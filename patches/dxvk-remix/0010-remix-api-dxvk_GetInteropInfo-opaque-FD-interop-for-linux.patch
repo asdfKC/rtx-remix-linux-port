@@ -1,8 +1,8 @@
-From 068e16270cc0c1f4bf30e9a1d9061727e77a7420 Mon Sep 17 00:00:00 2001
+From d1d90d54e3901f50d7d41a42a1dd4cee6b43a157 Mon Sep 17 00:00:00 2001
 From: Kush J <kushisthecoolest@gmail.com>
 Date: Mon, 26 Oct 2026 08:52:58 -0500
-Subject: [PATCH] remix api: dxvk_GetInteropInfo opaque-FD interop for OpenGL
- on Linux
+Subject: [PATCH 10/11] remix api: dxvk_GetInteropInfo opaque-FD interop for
+ OpenGL on Linux
 
 Exports a dedicated interop color image and two binary semaphores via
 VK_KHR_external_memory_fd / VK_KHR_external_semaphore_fd, filled from
@@ -32,7 +32,7 @@ Signed-off-by: Kush J <kushisthecoolest@gmail.com>
  5 files changed, 289 insertions(+), 2 deletions(-)
 
 diff --git a/src/d3d9/d3d9_swapchain.h b/src/d3d9/d3d9_swapchain.h
-index fc67a3c3..4669232f 100644
+index fc67a3c..4669232 100644
 --- a/src/d3d9/d3d9_swapchain.h
 +++ b/src/d3d9/d3d9_swapchain.h
 @@ -311,6 +311,15 @@ namespace dxvk {
@@ -77,7 +77,7 @@ index fc67a3c3..4669232f 100644
    };
  
 diff --git a/src/d3d9/d3d9_swapchain_external.cpp b/src/d3d9/d3d9_swapchain_external.cpp
-index 94ebfdcb..b8eaa56a 100644
+index 94ebfdc..b8eaa56 100644
 --- a/src/d3d9/d3d9_swapchain_external.cpp
 +++ b/src/d3d9/d3d9_swapchain_external.cpp
 @@ -32,6 +32,11 @@
@@ -195,7 +195,7 @@ index 94ebfdcb..b8eaa56a 100644
 +
  }
 diff --git a/src/dxvk/dxvk_image.h b/src/dxvk/dxvk_image.h
-index e4371a14..7eabe187 100644
+index e4371a1..7eabe18 100644
 --- a/src/dxvk/dxvk_image.h
 +++ b/src/dxvk/dxvk_image.h
 @@ -387,9 +387,18 @@ namespace dxvk {
@@ -219,10 +219,10 @@ index e4371a14..7eabe187 100644
      
      Rc<vk::DeviceFn>      m_vkd;
 diff --git a/src/dxvk/rtx_render/rtx_remix_api.cpp b/src/dxvk/rtx_render/rtx_remix_api.cpp
-index f9b77419..d7d7370e 100644
+index f5e2219..1a97d13 100644
 --- a/src/dxvk/rtx_render/rtx_remix_api.cpp
 +++ b/src/dxvk/rtx_render/rtx_remix_api.cpp
-@@ -51,6 +51,12 @@
+@@ -58,6 +58,12 @@
  
  #include <optional>
  
@@ -235,7 +235,7 @@ index f9b77419..d7d7370e 100644
  namespace dxvk {
    HRESULT CreateD3D9(
            bool           Extended,
-@@ -920,6 +926,16 @@ std::unique_ptr<dxvk::ExternalDrawState> dxvk::RemixAPIPrivateAccessor::toRtDraw
+@@ -1009,6 +1015,16 @@ std::unique_ptr<dxvk::ExternalDrawState> dxvk::RemixAPIPrivateAccessor::toRtDraw
    return state;
  }
  
@@ -252,7 +252,7 @@ index f9b77419..d7d7370e 100644
  namespace {
    remixapi_ErrorCode REMIXAPI_CALL remixapi_CreateMaterial(
      const remixapi_MaterialInfo* info,
-@@ -1382,6 +1398,12 @@ namespace {
+@@ -1471,6 +1487,12 @@ namespace {
      IDirect3D9Ex** out_pD3D9) {
      IDirect3D9Ex* d3d9ex = nullptr;
  
@@ -265,8 +265,8 @@ index f9b77419..d7d7370e 100644
  #ifdef _WIN32
      const bool withExternalSwapchain = info.forceNoVkSwapchain;
  #else
-@@ -1822,9 +1844,119 @@ namespace {
-     return notImplemented("UpdateTextureFromMemory");
+@@ -2295,9 +2317,119 @@ namespace {
+     return REMIXAPI_ERROR_CODE_SUCCESS;
    }
  
 +  // NV-DXVK start: OpenGL/Vulkan interop via opaque FDs (dxvk_GetInteropInfo, Linux only).
@@ -383,10 +383,10 @@ index f9b77419..d7d7370e 100644
    }
 +  // NV-DXVK end
  
-   remixapi_ErrorCode REMIXAPI_CALL remixapi_Submit(const remixapi_SubmitInfo* info) {
-     return notImplemented("Submit");
+   // Emits one command that commits every live retained instance into the current frame.
+   // Called at most once per frame, from Submit or from Present when the frame had no Submit. Requires s_mutex.
 diff --git a/src/dxvk/rtx_render/rtx_semaphore.cpp b/src/dxvk/rtx_render/rtx_semaphore.cpp
-index 89f03f10..e719cbeb 100644
+index 89f03f1..e719cbe 100644
 --- a/src/dxvk/rtx_render/rtx_semaphore.cpp
 +++ b/src/dxvk/rtx_render/rtx_semaphore.cpp
 @@ -61,8 +61,39 @@ namespace dxvk {
@@ -431,5 +431,5 @@ index 89f03f10..e719cbeb 100644
    }
  
 -- 
-2.56.0
+2.43.0
 

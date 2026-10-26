@@ -1,0 +1,99 @@
+From 0e3735fa49d4509e16d94bff4fe3a3a4035c7207 Mon Sep 17 00:00:00 2001
+From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
+Date: Mon, 26 Oct 2026 22:43:48 +0000
+Subject: [PATCH 11/11] ngx: pass Vulkan loader entry points on Linux;
+ REMIX_LINUX_DISABLE_NGX
+
+NVSDK_NGX_VULKAN_Init got null vkGetInstanceProcAddr and
+vkGetDeviceProcAddr, so NGX looks them up in the global symbol scope.
+libvulkan.so.1 is not in that scope when libremix.so is loaded with
+RTLD_LOCAL, which the JNI bridge does (dlsym(RTLD_DEFAULT,
+"vkGetInstanceProcAddr") returns NULL there). With DLSS feature
+libraries next to the runtime, the driver's NGX core then faulted inside
+NVSDK_NGX_VULKAN_Init_Ext2 during Startup. On Linux the runtime now
+passes the loader's vkGetInstanceProcAddr and the instance's
+vkGetDeviceProcAddr.
+
+On Linux NGX's application data path (its log directory) is now the
+working directory instead of the executable's directory, which for the
+JVM is a read-only system path. Init logs both paths.
+
+REMIX_LINUX_DISABLE_NGX=1 skips NGX entirely on Linux (DLSS, DLSS-RR
+and DLFG report unsupported), as a safe fallback.
+
+Windows is unchanged.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Tb41TgDi74v7sgH5LJBZ5A
+Signed-off-by: Claude (for Kush) <kushisthecoolest@gmail.com>
+---
+ src/dxvk/rtx_render/rtx_ngx_wrapper.cpp | 34 ++++++++++++++++++++++++-
+ 1 file changed, 33 insertions(+), 1 deletion(-)
+
+diff --git a/src/dxvk/rtx_render/rtx_ngx_wrapper.cpp b/src/dxvk/rtx_render/rtx_ngx_wrapper.cpp
+index 36e7b6a..d69f4df 100644
+--- a/src/dxvk/rtx_render/rtx_ngx_wrapper.cpp
++++ b/src/dxvk/rtx_render/rtx_ngx_wrapper.cpp
+@@ -70,6 +70,8 @@
+ 
+ #include <dxvk_device.h>
+ 
++#include <filesystem>
++
+ #define NGX_CALL(...) ngxCall([&] { return (__VA_ARGS__); })
+ 
+ namespace {
+@@ -166,8 +168,24 @@ namespace dxvk
+     m_supportsDlssNeuralRendering = false;
+     m_dlssNeuralRenderingSupportChecked = false;
+ 
++#ifndef _WIN32
++    // Escape hatch for driver/NGX combinations that still fail: skips NGX, so DLSS, DLSS-RR and DLFG report unsupported.
++    if (env::getEnvVar("REMIX_LINUX_DISABLE_NGX") == "1") {
++      Logger::info("NGX disabled by REMIX_LINUX_DISABLE_NGX=1");
++      s_dlssNeuralRenderingStatus.store(0, std::memory_order_release);
++      return false;
++    }
++#endif
++
++#ifdef _WIN32
+     const std::string exePath = env::getExePath();
+     const std::string exeFolder = exePath.substr(0, exePath.find_last_of("\\/"));
++#else
++    // NGX's application data path, where it writes its logs. The executable on Linux is usually a system binary
++    // (the JVM under /usr/lib/jvm) in a directory the user cannot write, so use the working directory, which the
++    // host application owns (the game directory for Minecraft).
++    const std::string exeFolder = std::filesystem::current_path().string();
++#endif
+     const auto logFolder = str::tows(exeFolder.c_str());
+     
+     NVSDK_NGX_Result result = NVSDK_NGX_Result_Fail;
+@@ -215,10 +233,24 @@ namespace dxvk
+     featureCommonInfo.LoggingInfo.DisableOtherLoggingSinks = true;
+ #endif
+ 
++#ifdef _WIN32
++    PFN_vkGetInstanceProcAddr getInstanceProcAddr = nullptr;
++    PFN_vkGetDeviceProcAddr getDeviceProcAddr = nullptr;
++#else
++    // Without these, NGX looks vkGetInstanceProcAddr up in the global symbol scope. libvulkan is not there when the
++    // runtime was loaded with RTLD_LOCAL (the JNI bridge does that), so NGX called a null pointer inside
++    // NVSDK_NGX_VULKAN_Init_Ext2 once feature libraries were present. Pass the loader entry points the runtime uses.
++    PFN_vkGetInstanceProcAddr getInstanceProcAddr = &vkGetInstanceProcAddr;
++    PFN_vkGetDeviceProcAddr getDeviceProcAddr = reinterpret_cast<PFN_vkGetDeviceProcAddr>(
++      vkGetInstanceProcAddr(vkInstance, "vkGetDeviceProcAddr"));
++    Logger::info(str::format("NGX init: application data path ", exeFolder,
++      ", feature path ", featureDirectory.empty() ? std::string("(none)") : featureDirectory));
++#endif
++
+     result = NGX_CALL(NVSDK_NGX_VULKAN_Init(
+       RtxOptions::applicationId(), logFolder.c_str(),
+       vkInstance, vkPhysicalDevice, vkDevice,
+-      nullptr, nullptr,
++      getInstanceProcAddr, getDeviceProcAddr,
+       &featureCommonInfo));
+ 
+     if (NVSDK_NGX_FAILED(result)) {
+-- 
+2.43.0
+

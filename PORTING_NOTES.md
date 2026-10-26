@@ -781,3 +781,58 @@ silently skipped before they reached it.
   fully warm, small set of material/shader permutations frame after frame as the player plays, unlike
   this synthetic one-shot test), but if a newly-introduced material/light/mesh combination ever
   produces a transient black frame or two in-game, this is the mechanism and `=0` is the knob.
+
+## Phase D step 6: Startup faults in NGX init with the DLSS libraries present (2026-10-26)
+
+**Status:** fix compiles, links, and runs on lavapipe, where NGX is unavailable, so it only shows that nothing
+regressed. **Not verified on GPU. DLSS is not claimed to work.**
+
+**Symptom (RTX 5070, in game):**
+- With `libnvidia-ngx-dlss*.so.310.9.1` next to `libremix.so`, `remixapi_Startup` takes SIGSEGV inside
+  `NVSDK_NGX_VULKAN_Init_Ext2`, in the driver's `libnvidia-ngx.so.1`.
+- Call chain: `NGXContext::initialize` ← `createDLSSContext` ← `DxvkDLSS` ← `DxvkObjects` ← `DxvkDevice` ←
+  `CreateDeviceEx` ← `remixapi_Startup` ← JNI `startup`.
+- Without the libraries, NGX init returns FeatureNotSupported and Startup works.
+
+**Most likely cause, found in the code:**
+- `NGXContext::initialize` passed `nullptr` for `InGIPA`/`InGDPA` (`vkGetInstanceProcAddr`/`vkGetDeviceProcAddr`).
+  The static NGX loader (`libnvsdk_ngx.a`, DLSS 310.9.1) forwards them unchanged to the driver's NGX core, which
+  then has to find the Vulkan loader itself.
+- `libremix.so` reaches `libvulkan.so.1` only as a `DT_NEEDED` of a library that the JNI bridge `dlopen`s with
+  `RTLD_LOCAL`, from a bridge the JVM also loaded locally. So libvulkan is not in the global symbol scope.
+- Reproduced in the container: after loading `libremix.so` that way, `dlsym(RTLD_DEFAULT, "vkGetInstanceProcAddr")`
+  is NULL, while `dlopen("libvulkan.so.1", RTLD_NOLOAD)` shows the library is loaded.
+- A NULL entry point called by the NGX core fits the trace. So does the dependence on the feature libraries: with
+  none found, NGX returns "unsupported" before touching Vulkan.
+- On Windows `vulkan-1.dll` is always findable by name, so this never showed up there.
+
+**Ruled out by reading the code:**
+- *wchar_t width:* the Linux NGX library uses 4-byte `wchar_t` (`wcslen`, `mbstowcs`). `str::tows` produces 4-byte
+  units with a correct terminator on Linux.
+- *Feature path:* it is the runtime's own directory (`dladdr` in `env::getDllDirectory`), which is where the
+  libraries are staged.
+- *Required extensions:* the SDK's list (`VK_KHR_get_physical_device_properties2`; `VK_NVX_binary_import`,
+  `VK_NVX_image_view_handle`, `VK_KHR_push_descriptor`, buffer device address) matches what `DxvkAdapter` enables
+  for CUDA interop. The step 1 GPU log showed NRC up, and NRC needs the same set.
+- *Application ID:* it is passed as on Windows (`rtx.applicationId`). Init uses `NVSDK_NGX_VULKAN_Init` with an
+  application ID, not the project-ID entry point.
+
+**Fix (patch 0011, Linux only, Windows unchanged):**
+- Pass the loader's `vkGetInstanceProcAddr`, and `vkGetDeviceProcAddr` resolved from the instance.
+- The application data path (NGX's log directory) is the working directory (the game directory) instead of the
+  JVM's read-only `bin`. Init logs both paths (`NGX init: application data path …, feature path …`).
+- `REMIX_LINUX_DISABLE_NGX=1` skips NGX entirely (DLSS, DLSS-RR and DLFG report unsupported), as the safe fallback
+  if the fault persists.
+
+**Not confirmed:** I have not seen the coredump. It confirms this cause if the top frame is address `0x0` (or an
+unresolved `??`) called from `libnvidia-ngx.so.1`. If instead the top frame is a named function deep inside
+`libnvidia-ngx.so.1`, the cause is something else, and the fallback is the switch above.
+
+**Series fix:** `0010` (FD interop) was cut from the step 1 tree and no longer applied after `0008`/`0009`.
+It is rebased onto them with identical changes, authorship kept, so the series applies with `git am` again.
+
+**Mod side, not changed in this step:** `InteropHandles` (mod patch 0002) assumed the runtime keeps stable FDs and
+imports a `dup()`. Step 5 defines the opposite contract: every `GetInteropInfo` call returns fresh, caller-owned
+FDs, and the semaphores are binary. As written, the mod would therefore leak an FD per call and re-import the image
+every frame. `GlInterop` also sets NV timeline values, and it does not set `GL_TEXTURE_TILING_EXT =
+GL_OPTIMAL_TILING_EXT`, which step 5 found the import needs. To be fixed in the mod next.
