@@ -8,7 +8,14 @@
  * depending on the window system (Wayland/Hyprland in this case).
  *
  * Build: see build_interop_gl.sh next to this file.
- * Run:   ./interop_gl <path to libremix.so> <out.ppm>
+ * Run:   RTX_ENABLE_ASYNC_COMPILATION=0 ./interop_gl <path to libremix.so> <out.ppm>
+ *
+ * RTX_ENABLE_ASYNC_COMPILATION=0 matters: this test's material/mesh/light/camera combination is
+ * compiling its shader pipelines for the first time ever, and by default (rtx.shader.
+ * enableAsyncCompilation=true) a frame whose pipeline isn't ready yet is silently skipped rather
+ * than blocked on -- across this test's short, back-to-back Present() loop, that can mean every
+ * single frame comes back black. Setting it to 0 makes the first frame that needs a new pipeline
+ * block until it's ready instead. See PORTING_NOTES.md Phase D step 5 for the full story.
  */
 #include <dlfcn.h>
 #include <stdio.h>

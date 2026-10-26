@@ -592,10 +592,17 @@ pinned commit with `git am`. **The Gradle build path, Prism itself and the game 
 
 ## Phase D step 5: FD interop for `dxvk_GetInteropInfo` (2026-10-26, on the RTX 5070)
 
-**Status:** the FD mechanism itself (export, import, synchronization, readback) is **verified on the
-RTX 5070** with two independent hardware proofs. A real ray-traced lit frame through it is **not yet
-achieved**; see "Open issue" below. Branch `interop-local`, patch
-`0010-remix-api-dxvk_GetInteropInfo-opaque-FD-interop-for-linux.patch`.
+**Status: verified on the RTX 5070 end to end, including a real ray-traced lit frame.** The FD
+mechanism (export, import, synchronization, readback) was confirmed with two independent hardware
+proofs, and after finding and working around a shader-compilation-timing issue (below), a real lit
+quad reads back through the full interop path with `avg=145.1, min=0, max=255` -- a shaped image
+(bright center, dark background, soft falloff at the edges), not a flat color or noise. Branch
+`interop-local`, patch `0010-remix-api-dxvk_GetInteropInfo-opaque-FD-interop-for-linux.patch`. An
+earlier draft of this section said a lit frame was "not yet achieved" with an "open issue" below --
+that was wrong in a way worth naming: it correctly reported the test's *symptom* (all-zero output)
+but prematurely filed it as a renderer/scene-setup gap before the actual cause (next section) was
+found. No runtime code changed to fix it; the fix is entirely in which env var the test (and anyone
+else driving this runtime from outside Minecraft) sets.
 
 ### Design
 
@@ -699,38 +706,56 @@ since `glGetString(GL_EXTENSIONS)` is empty on a core profile), then:
    `blitImageHelper` call runs): **exact magenta read back again**
    (`evidence/phaseC2-interop-debugclear-blit-5070.{log,ppm}`). Proves the blit step itself, end to
    end, through the exact code path a real frame uses.
-4. **Full scene test** (`tests/interop_gl.c` as committed, no debug flag): `CreateMaterial`
-   (emissive, `albedoConstant`), `CreateMesh` (a quad), `CreateLight` (sphere), `SetupCamera`
-   (`CameraInfoParameterizedEXT`), 16x `{SetupCamera, DrawInstance, DrawLightInstance, Present}` ->
-   `dxvk_GetInteropInfo` -> import -> wait -> read back: **all-zero** (not garbage, not noise -- a
-   clean, reproducible all-black 640x360) (`evidence/phaseC2-interop-scene-5070.{log,ppm}`).
+4. **Full scene test, first attempts** (`tests/interop_gl.c`, camera/light built the same way
+   `RemixRenderer.updateCamera`/`LightManager` in the mod build it -- read from a fresh
+   `rtx-remix-minecraft` clone, not guessed: `CameraInfoParameterizedEXT` with `right`/`up`/`forward`
+   from yaw/pitch, `LightInfoSphereEXT` with a `radiance` scale): `CreateMaterial` (emissive,
+   `albedoConstant`), `CreateMesh` (a quad), `CreateLight` (sphere), `SetupCamera`, 16x `{SetupCamera,
+   DrawInstance, DrawLightInstance, Present}` -> `dxvk_GetInteropInfo` -> import -> wait -> read back:
+   **all-zero** (not garbage, not noise -- a clean, reproducible all-black 640x360)
+   (`evidence/phaseC2-interop-scene-5070.{log,ppm}`). Ruled out along the way: GL landing on the wrong
+   GPU (confirmed 5070), `GL_EXTENSIONS` query method (was a real bug, fixed), alpha test rejecting the
+   surface (`alphaTestType=7` is `VK_COMPARE_OP_ALWAYS`, correct), tone mapping/auto-exposure clipping
+   (tried `emissiveIntensity` up to 100000, still exactly zero, not just dim), camera/light API shape
+   (matches the mod's own usage), quad winding (tried `doubleSided=1`, no change), and the headless
+   frame counter (`DxvkDevice::getCurrentFrameId()`/`QueuePresentCount`) -- it does advance every
+   frame; `D3D9SwapchainExternal::Present()` already calls `incrementPresentCount()`, just after
+   `EndFrame`/`injectRTX` uses the *pre*-increment value, which is consistent frame to frame. An
+   earlier draft of this document floated the frame counter as a live suspect without having actually
+   traced the increment's call site; it doesn't hold up.
 
-### Open issue: the test scene renders as pure black
+5. **Root cause found: the wrong env var was used to force synchronous shader compilation.**
+   `rtx.shader.enableAsyncCompilation` (env `RTX_ENABLE_ASYNC_COMPILATION`, **default true**) makes
+   `RtxContext::injectRTX` skip ray tracing for a frame -- silently, no log line -- whenever any
+   pipeline needed by the current draw state hasn't finished compiling yet
+   (`src/dxvk/rtx_render/rtx_context.cpp:608`, `if (isRaytracingEnabled && isCameraValid &&
+   !asyncShaderCompilationActive)`). `RTX_ASYNC_SHADER_PREWARMING` (what every prior test in this repo
+   set) controls a *different* option, `rtx.initializer.asyncShaderPrewarming` -- whether `Startup`
+   proactively compiles shaders ahead of time -- and disabling it does not make first-use compilation
+   synchronous; it only means prewarming doesn't happen, so first use triggers compilation from a
+   colder cache. This test's exact material/mesh/light/camera combination is the **first time ever**
+   that shader permutation has been requested on this Linux build, and its async compile evidently
+   didn't finish within 16 quick, back-to-back `Present()` calls -- so every one of those frames hit
+   the async-compile-in-flight skip. Setting `RTX_ENABLE_ASYNC_COMPILATION=0` forces `injectRTX` to
+   block synchronously on first use instead of skipping, and the very next run produced a real image:
+   `avg=145.1-145.13, min=0, max=255` across two separate runs, and inspecting the PPM directly shows
+   a bright (255,255,255) center with soft falloff to a black background at the edges -- a shaped
+   emissive quad against nothing, exactly the test scene
+   (`evidence/phaseC2-interop-lit-5070.{log,ppm}`).
 
-(2) and (3) together leave only one place left for this to go wrong: Remix's renderer is writing an
-all-black `targetImage` for this scene, i.e. this is a rendering/scene-setup issue, not an interop
-issue. Candidates not yet ruled out, in rough order of suspicion:
-- A gap specific to the **headless runtime's** handling of the classic immediate-mode API
-  (`DrawInstance`/`DrawLightInstance`/`SetupCamera`) with **real** geometry -- every existing
-  headless test (Phase B/C step 1) only ever exercised an *empty* scene, so this exact combination
-  (classic API + a textured/lit instance + headless swapchain) has never been exercised on Linux
-  before this session.
-- Frame-id bookkeeping: `RtCamera::isValid()` compares against `DxvkDevice::getCurrentFrameId()`,
-  which is backed by `QueuePresentCount`, incremented only by the real presenter's `presentImage()`
-  -- which the headless path never calls (it bypasses `vk::Presenter` entirely, per Phase B). The
-  counter is likely frozen at a constant value for the whole headless session. Traced through by hand
-  this looked self-consistent (camera and check read the same frozen value), but it was not verified
-  with instrumentation, and a frozen frame counter is exactly the kind of thing that breaks an
-  invariant nobody had reason to check before.
-- Light sampling (NEE/ReSTIR/RTXDI) needing more warmup frames than the 16 tried, though the
-  emissive-material variant (self-lit, independent of light sampling) came back equally black, which
-  argues against this.
-- Something about the quad's winding/orientation -- tried `doubleSided=1` to rule this out, no change.
+### Where the output comes from, end to end (requested verification of the data path)
 
-Ruled out: GL landing on the wrong GPU (checked, confirmed 5070), `GL_EXTENSIONS` query method (was a
-real bug, fixed, see commit), alpha test rejecting the surface (`alphaTestType=7` is
-`VK_COMPARE_OP_ALWAYS`, correct), tone mapping/auto-exposure clipping (tried `emissiveIntensity` up to
-100000, still exactly zero, not just dim).
+`D3D9SwapchainExternal::Present()`: `m_rtx.EndFrame(targetImage)` runs `injectRTX`, which ray traces
+into the internal G-buffer/denoiser resources and resolves to `m_finalOutput`; `Present()` then blits
+`m_finalOutput` into `targetImage` (the headless backbuffer), composites HUD/ImGui on top of
+`targetImage` if enabled, transitions `targetImage` to `SHADER_READ_ONLY_OPTIMAL`, and -- the interop
+addition -- blits that same `targetImage` into the dedicated exportable `m_interopColorImage` and
+signals `dxvkDoneSemaphore`. `dxvk_SetDefaultOutput`/`dxvk_CopyRenderingOutput` are a separate,
+unrelated path (explicit single-shot copies into a caller-supplied D3D9 surface, used by
+`GetExternalSwapchain`-style HdRemix-like clients) and are not part of this flow; `skipVulkanSwapchain`
+has no effect on Linux since the headless runtime never creates a real swapchain regardless of its
+value. None of this needed to change -- the pipeline was always correct; frames were just being
+silently skipped before they reached it.
 
 ### What the cloud session needs for the Minecraft/JNI side
 
@@ -744,7 +769,15 @@ real bug, fixed, see commit), alpha test rejecting the surface (`alphaTestType=7
 - The interop image is always `REMIXAPI_TEXTURE_FORMAT_RGBA8_UNORM`, `VK_IMAGE_TILING_OPTIMAL` --
   import with `GL_TEXTURE_TILING_EXT = GL_OPTIMAL_TILING_EXT` before `glTexStorageMem2DEXT`, or the
   import will fail outright (confirmed while building the test: omitting this causes a GL error).
-- Nothing about the Minecraft integration itself was touched or assumed beyond what the public
-  `remix_c.h` comment block documents; the mod repo was not cloned this session (GitHub access was
-  down for this tool run), so cross-check `rtxremix-java/native/remixbridge.cpp` and
-  `GlInterop.java`'s actual call sites against this writeup before porting them.
+- Nothing about the Minecraft integration itself was touched; the mod repo (`rtx-remix-minecraft`,
+  shallow clone) was read for `remixbridge.cpp`'s camera/light/instance call shapes and
+  `RemixRenderer.updateCamera`'s `CameraInfoParameterizedEXT` construction, to build the test scene
+  the same way the mod does rather than guessing -- but `GlInterop.java` itself (the actual Minecraft
+  GL-side interop consumer) was not read this session; cross-check it against this writeup before
+  porting it to FDs.
+- **If the Minecraft mod (or anything else driving this runtime from outside this repo's own tests)
+  sees intermittently black or stale frames, check `RTX_ENABLE_ASYNC_COMPILATION`.** It defaults to
+  `true` upstream and is very likely *fine* for the real mod (which keeps reusing the same, by-then
+  fully warm, small set of material/shader permutations frame after frame as the player plays, unlike
+  this synthetic one-shot test), but if a newly-introduced material/light/mesh combination ever
+  produces a transient black frame or two in-game, this is the mechanism and `=0` is the knob.
