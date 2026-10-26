@@ -305,3 +305,53 @@ RTX 5070, Arch Linux, NVIDIA driver **615.78.08**, `DXVK_REMIX_NVIDIA_MIN_DRIVER
 `tests/startup_remix.c` returned `Startup`, 3× `Present` and `Shutdown` all **0x0**, with no surface error.
 The device came up with RT, OMM, SER, NRC and the FD external memory/semaphore extensions enabled.
 The run took 14.3 s in total, about 13.5 s of it in `Shutdown`, with a cold shader cache.
+
+## Phase C step 2: retained scene instances, Submit, UpdateMaterial (2026-10-26)
+
+**Status:** compiles, links, and passes a software-Vulkan smoke test (lavapipe). **Not verified on GPU.**
+
+### Behaviour, taken from the mod (`remixbridge.cpp`, `RemixInstance.java`, `RemixRenderer.java`)
+- The mod adds an instance once and calls `SceneInstanceUpdate` only when something changes. Every update is a
+  complete replacement. Unchanged instances make **no** native call, so they must keep rendering every frame.
+  Culled instances are removed, and the mod keeps `INACTIVE_HANDLE` until they come back.
+- The `pNext` chain (`InstanceInfoBlendEXT` on the C heap) is only valid **during** the call.
+- The mod calls `Submit` once per frame, before `Present`. `blitGlToRemix` calls it if the frame has not done so yet.
+- `sceneInstanceAdd` treats a 0 handle as failure.
+
+### Implementation (`rtx_remix_api.cpp`)
+- **Handles.** Handles come from a counter on the caller thread (never 0, never reused), so `Add` returns one
+  at once. The caller thread also keeps a set of live handles (under the API mutex), so `Update` and `Remove`
+  on an unknown or removed handle return `INVALID_ARGUMENTS` straight away.
+- **Instance state.** `InstanceInfo` is converted to `ExternalDrawState` during the call, the same conversion
+  `DrawInstance` uses, and that consumes the `pNext` chain. A CS command then stores it in a map on the CS
+  thread. `Remove` erases it the same way. The CS ordering keeps add, update and remove in call order.
+- **Frame boundary.** `Submit` emits one CS command. It runs each stored instance through the existing
+  `DrawInstance` path (`commitExternalGeometryToRT`). If a frame reaches `Present` without a `Submit`, the replay
+  happens there, so retained instances never drop out for a frame. It happens at most once per frame.
+- **`UpdateMaterial`** replaces the material data for the handle on the CS thread
+  (`AssetReplacer::updateExternalMaterial`). Draws look up materials by handle at draw time, so live instances
+  pick up the change on the next frame. An update to a handle that was never created registers it and logs a warning.
+- **`Shutdown`** drops all retained instances after the device is released. Instances still alive at that point are not an error.
+- **Debug export (Linux):** `remixlinux_GetRetainedSceneStats(&live, &replayedDraws)` returns the live count
+  and the total number of draws replayed.
+
+### Test (`tests/scene_remix.c`, lavapipe; `evidence/phaseC2-scene-lavapipe.log`)
+The test runs `Startup` → `CreateMaterial` → `CreateMesh` (one quad) → `SceneInstanceAdd`, then overwrites the
+info struct. Then:
+- 4 frames (`SetupCamera` + `Submit` + `Present`), then 1 `Present` with no `Submit`.
+- `SceneInstanceUpdate` (moved), `UpdateMaterial` (new albedo), then 2 frames.
+- `SceneInstanceRemove`, then 5 frames.
+- Error paths, a second instance left alive, `Shutdown`.
+
+Every call returned what was expected. The stats read `live=1 replayedDraws=4` after the first 4 frames, then
+`live=0 replayedDraws=7` after the remove. The count did not grow in later frames.
+The test checks that calls succeed and that the replay is counted. It does not check pixels: the headless
+runtime has no readback yet, and that needs the interop image.
+
+### Not covered yet
+- An instance whose mesh is destroyed stays live. It draws nothing, because `accessExternalMesh` returns an
+  empty mesh for unknown handles, and it does not crash. If a later mesh got the same handle value (handles are
+  heap pointers), the instance would draw that mesh. The mod's entity submitter destroys transient meshes only after
+  no instance refers to them (`retireTransientMeshes`). The mod's other destroy paths have not been checked.
+- `SubmitInfo` has no fields the runtime uses yet. In 0.16 the frame should render into the interop image;
+  that is part of the FD interop work.

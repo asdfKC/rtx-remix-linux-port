@@ -1,0 +1,286 @@
+From ac5a243ffd948add38c0a2ec4151dd9a38964c4d Mon Sep 17 00:00:00 2001
+From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
+Date: Mon, 26 Oct 2026 01:26:43 +0000
+Subject: [PATCH 8/8] remix api: retained scene instances, Submit,
+ UpdateMaterial
+
+SceneInstanceAdd/Update/Remove keep converted ExternalDrawState on the CS
+thread, keyed by caller-side handles (never 0, never reused). Submit
+replays live instances through the existing DrawInstance path once per
+frame; Present does the replay if the frame had no Submit. Update and
+Remove on unknown handles return INVALID_ARGUMENTS. UpdateMaterial
+replaces the material data by handle. Retained state is cleared at
+Shutdown. Linux-only debug export remixlinux_GetRetainedSceneStats.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Tb41TgDi74v7sgH5LJBZ5A
+Signed-off-by: Claude (for Kush) <kushisthecoolest@gmail.com>
+---
+ src/dxvk/rtx_render/rtx_asset_replacer.cpp |  10 ++
+ src/dxvk/rtx_render/rtx_asset_replacer.h   |   3 +
+ src/dxvk/rtx_render/rtx_remix_api.cpp      | 170 ++++++++++++++++++++-
+ 3 files changed, 178 insertions(+), 5 deletions(-)
+
+diff --git a/src/dxvk/rtx_render/rtx_asset_replacer.cpp b/src/dxvk/rtx_render/rtx_asset_replacer.cpp
+index 0fec272..f525c26 100644
+--- a/src/dxvk/rtx_render/rtx_asset_replacer.cpp
++++ b/src/dxvk/rtx_render/rtx_asset_replacer.cpp
+@@ -240,6 +240,16 @@ void AssetReplacer::destroyExternalMaterial(remixapi_MaterialHandle handle) {
+   m_extMaterials.erase(handle);
+ }
+ 
++bool AssetReplacer::updateExternalMaterial(remixapi_MaterialHandle handle, MaterialData&& data) {
++  auto found = m_extMaterials.find(handle);
++  if (found == m_extMaterials.end()) {
++    m_extMaterials.emplace(handle, std::move(data));
++    return false;
++  }
++  found->second = std::move(data);
++  return true;
++}
++
+ void AssetReplacer::registerExternalMesh(remixapi_MeshHandle handle, std::vector<RasterGeometry>&& submeshes) {
+   if (m_extMeshes.count(handle) > 0) {
+     Logger::info("Ignoring repeated mesh registration (handle=" + tostr(handle) + ") ");
+diff --git a/src/dxvk/rtx_render/rtx_asset_replacer.h b/src/dxvk/rtx_render/rtx_asset_replacer.h
+index 63cc0ca..4e7e975 100644
+--- a/src/dxvk/rtx_render/rtx_asset_replacer.h
++++ b/src/dxvk/rtx_render/rtx_asset_replacer.h
+@@ -577,6 +577,9 @@ namespace dxvk {
+     void makeMaterialWithTexturePreload(DxvkContext& ctx, remixapi_MaterialHandle handle, MaterialData&& data);
+     [[nodiscard]] const MaterialData* accessExternalMaterial(remixapi_MaterialHandle handle) const;
+     void destroyExternalMaterial(remixapi_MaterialHandle handle);
++    // Replaces the data of an external material, or registers it when the handle is unknown.
++    // Returns false when the handle was not registered before.
++    bool updateExternalMaterial(remixapi_MaterialHandle handle, MaterialData&& data);
+ 
+     void registerExternalMesh(remixapi_MeshHandle handle, std::vector<RasterGeometry>&& submeshes);
+     // Shared pointer because destroyExternalMesh can erase the entry while
+diff --git a/src/dxvk/rtx_render/rtx_remix_api.cpp b/src/dxvk/rtx_render/rtx_remix_api.cpp
+index f9b7741..397be85 100644
+--- a/src/dxvk/rtx_render/rtx_remix_api.cpp
++++ b/src/dxvk/rtx_render/rtx_remix_api.cpp
+@@ -104,6 +104,35 @@ namespace {
+     return s_registry;
+   }
+ 
++  // Retained scene instances (API 0.16). The converted draw states live on the CS thread, which replays them
++  // into each frame. The caller side tracks which handles are live, so invalid handles fail synchronously.
++  // See PORTING_NOTES.md, Phase C step 2.
++  struct RetainedSceneCs {
++    std::unordered_map<uint64_t, dxvk::ExternalDrawState> instances;
++    // Diagnostics, written on the CS thread and read by remixlinux_GetRetainedSceneStats.
++    std::atomic<uint64_t> liveCount { 0 };
++    std::atomic<uint64_t> replayedDraws { 0 };
++  };
++
++  RetainedSceneCs& retainedSceneCs() {
++    static RetainedSceneCs s_scene;
++    return s_scene;
++  }
++
++  // Guarded by s_mutex.
++  struct RetainedSceneCaller {
++    uint64_t nextHandle = 1;
++    std::unordered_set<uint64_t> live;
++    bool replayedThisFrame = false;
++  };
++
++  RetainedSceneCaller& retainedSceneCaller() {
++    static RetainedSceneCaller s_scene;
++    return s_scene;
++  }
++
++  void replayRetainedSceneLocked(dxvk::D3D9DeviceEx* remixDevice);
++
+   // Logs once per entry point and fails, for parts of the API this runtime does not implement yet.
+   remixapi_ErrorCode notImplemented(const char* functionName) {
+     static dxvk::mutex s_loggedMutex;
+@@ -1748,6 +1777,14 @@ namespace {
+       s_dxvkD3D9 = nullptr;
+     }
+ 
++    // The CS thread is gone with the device, so the retained scene can be cleared directly.
++    retainedSceneCs().instances.clear();
++    retainedSceneCs().liveCount = 0;
++    {
++      std::lock_guard lock { s_mutex };
++      retainedSceneCaller() = RetainedSceneCaller {};
++    }
++
+     // Make sure Sentry doesn't keep the process alive when it should be shutting down.
+     dxvk::sentry::shutdown();
+ 
+@@ -1759,6 +1796,12 @@ namespace {
+     if (!remixDevice) {
+       return REMIXAPI_ERROR_CODE_REMIX_DEVICE_WAS_NOT_REGISTERED;
+     }
++    {
++      // Retained instances render in every frame, also in one that had no Submit.
++      std::lock_guard lock { s_mutex };
++      replayRetainedSceneLocked(remixDevice);
++      retainedSceneCaller().replayedThisFrame = false;
++    }
+     HRESULT hr = remixDevice->Present(NULL, NULL, info ? info->hwndOverride : NULL, NULL);
+     if (FAILED(hr)) {
+       return REMIXAPI_ERROR_CODE_GENERAL_FAILURE;
+@@ -1826,30 +1869,134 @@ namespace {
+     return notImplemented("dxvk_GetInteropInfo");
+   }
+ 
++  // Emits one command that commits every live retained instance into the current frame.
++  // Called at most once per frame, from Submit or from Present when the frame had no Submit. Requires s_mutex.
++  void replayRetainedSceneLocked(dxvk::D3D9DeviceEx* remixDevice) {
++    auto& caller = retainedSceneCaller();
++    if (caller.replayedThisFrame) {
++      return;
++    }
++    caller.replayedThisFrame = true;
++    if (caller.live.empty()) {
++      return;
++    }
++    remixDevice->EmitCs<false>([](dxvk::DxvkContext* dxvkCtx) {
++      ScopedCpuProfileZoneN("Replay retained scene instances");
++      auto* ctx = static_cast<dxvk::RtxContext*>(dxvkCtx);
++      auto& scene = retainedSceneCs();
++      for (const auto& [handle, state] : scene.instances) {
++        ctx->commitExternalGeometryToRT(std::make_unique<dxvk::ExternalDrawState>(state));
++      }
++      scene.replayedDraws += scene.instances.size();
++    });
++  }
++
++  // Frame boundary for scene submission. Live retained instances are replayed into the frame here.
++  // Rendering itself still happens in Present until the interop path moves it here.
+   remixapi_ErrorCode REMIXAPI_CALL remixapi_Submit(const remixapi_SubmitInfo* info) {
+-    return notImplemented("Submit");
++    dxvk::D3D9DeviceEx* remixDevice = tryAsDxvk();
++    if (!remixDevice) {
++      return REMIXAPI_ERROR_CODE_REMIX_DEVICE_WAS_NOT_REGISTERED;
++    }
++    if (info && info->sType != REMIXAPI_STRUCT_TYPE_SUBMIT_INFO) {
++      return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
++    }
++    std::lock_guard lock { s_mutex };
++    replayRetainedSceneLocked(remixDevice);
++    return REMIXAPI_ERROR_CODE_SUCCESS;
+   }
+ 
++  // The info and its pNext chain are converted during the call, so the caller may free them right after.
+   remixapi_ErrorCode REMIXAPI_CALL remixapi_SceneInstanceAdd(
+     const remixapi_InstanceInfo* info,
+     remixapi_SceneInstanceHandle* out_handle) {
+-    return notImplemented("SceneInstanceAdd");
++    dxvk::D3D9DeviceEx* remixDevice = tryAsDxvk();
++    if (!remixDevice) {
++      return REMIXAPI_ERROR_CODE_REMIX_DEVICE_WAS_NOT_REGISTERED;
++    }
++    if (!info || !out_handle || info->sType != REMIXAPI_STRUCT_TYPE_INSTANCE_INFO || !info->mesh) {
++      return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
++    }
++    ScopedCpuProfileZone();
++    auto drawState = convert::toRtDrawState(*info);
++
++    std::lock_guard lock { s_mutex };
++    auto& caller = retainedSceneCaller();
++    const uint64_t handle = caller.nextHandle++;
++    caller.live.insert(handle);
++    remixDevice->EmitCs<false>([cHandle = handle, cState = std::move(drawState)](dxvk::DxvkContext*) mutable {
++      auto& scene = retainedSceneCs();
++      scene.instances.insert_or_assign(cHandle, std::move(*cState));
++      scene.liveCount = scene.instances.size();
++    });
++    *out_handle = reinterpret_cast<remixapi_SceneInstanceHandle>(handle);
++    return REMIXAPI_ERROR_CODE_SUCCESS;
+   }
+ 
++  // Replaces the complete description of a retained instance, including its pNext chain.
+   remixapi_ErrorCode REMIXAPI_CALL remixapi_SceneInstanceUpdate(
+     remixapi_SceneInstanceHandle handle,
+     const remixapi_InstanceInfo* info) {
+-    return notImplemented("SceneInstanceUpdate");
++    dxvk::D3D9DeviceEx* remixDevice = tryAsDxvk();
++    if (!remixDevice) {
++      return REMIXAPI_ERROR_CODE_REMIX_DEVICE_WAS_NOT_REGISTERED;
++    }
++    if (!handle || !info || info->sType != REMIXAPI_STRUCT_TYPE_INSTANCE_INFO || !info->mesh) {
++      return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
++    }
++    ScopedCpuProfileZone();
++    auto drawState = convert::toRtDrawState(*info);
++
++    std::lock_guard lock { s_mutex };
++    const uint64_t id = reinterpret_cast<uint64_t>(handle);
++    if (retainedSceneCaller().live.count(id) == 0) {
++      return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
++    }
++    remixDevice->EmitCs<false>([cHandle = id, cState = std::move(drawState)](dxvk::DxvkContext*) mutable {
++      retainedSceneCs().instances.insert_or_assign(cHandle, std::move(*cState));
++    });
++    return REMIXAPI_ERROR_CODE_SUCCESS;
+   }
+ 
+   remixapi_ErrorCode REMIXAPI_CALL remixapi_SceneInstanceRemove(remixapi_SceneInstanceHandle handle) {
+-    return notImplemented("SceneInstanceRemove");
++    dxvk::D3D9DeviceEx* remixDevice = tryAsDxvk();
++    if (!remixDevice) {
++      return REMIXAPI_ERROR_CODE_REMIX_DEVICE_WAS_NOT_REGISTERED;
++    }
++    std::lock_guard lock { s_mutex };
++    const uint64_t id = reinterpret_cast<uint64_t>(handle);
++    if (!handle || retainedSceneCaller().live.erase(id) == 0) {
++      return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
++    }
++    remixDevice->EmitCs<false>([cHandle = id](dxvk::DxvkContext*) {
++      auto& scene = retainedSceneCs();
++      scene.instances.erase(cHandle);
++      scene.liveCount = scene.instances.size();
++    });
++    return REMIXAPI_ERROR_CODE_SUCCESS;
+   }
+ 
++  // Replaces the material registered under handle. Draws look materials up by handle, so the next frame uses it.
+   remixapi_ErrorCode REMIXAPI_CALL remixapi_UpdateMaterial(
+     remixapi_MaterialHandle handle,
+     const remixapi_MaterialInfo* info) {
+-    return notImplemented("UpdateMaterial");
++    dxvk::D3D9DeviceEx* remixDevice = tryAsDxvk();
++    if (!remixDevice) {
++      return REMIXAPI_ERROR_CODE_REMIX_DEVICE_WAS_NOT_REGISTERED;
++    }
++    if (!handle || !info || info->sType != REMIXAPI_STRUCT_TYPE_MATERIAL_INFO) {
++      return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
++    }
++    std::lock_guard lock { s_mutex };
++    remixDevice->EmitCs([cHandle = handle,
++                         cMaterialData = convert::toRtMaterialWithoutTexturePreload(*info),
++                         cPreloadSrc = convert::makePreloadSource(*info)](dxvk::DxvkContext* ctx) {
++      auto& assets = ctx->getCommonObjects()->getSceneManager().getAssetReplacer();
++      if (!assets->updateExternalMaterial(cHandle, convert::toRtMaterialFinalized(*ctx, cMaterialData, cPreloadSrc))) {
++        dxvk::Logger::warn("[RemixAPI] UpdateMaterial: the handle was not created by CreateMaterial, registering it.");
++      }
++    });
++    return REMIXAPI_ERROR_CODE_SUCCESS;
+   }
+ 
+   // Config layers are accepted and ignored: every acquire returns a distinct handle, and blending and release succeed.
+@@ -2036,3 +2183,16 @@ extern "C" REMIXAPI void REMIXAPI_CALL remixlinux_SetWindowSize(uint32_t width,
+ }
+ #endif
+ 
++#ifndef _WIN32
++// Linux-only diagnostic export: the retained instances the CS thread holds, and the total number of draws
++// replayed from them. Both reflect commands the CS thread has executed, which can trail the API calls.
++extern "C" REMIXAPI void REMIXAPI_CALL remixlinux_GetRetainedSceneStats(uint64_t* outLive, uint64_t* outReplayedDraws) {
++  if (outLive) {
++    *outLive = retainedSceneCs().liveCount;
++  }
++  if (outReplayedDraws) {
++    *outReplayedDraws = retainedSceneCs().replayedDraws;
++  }
++}
++#endif
++
+-- 
+2.43.0
+

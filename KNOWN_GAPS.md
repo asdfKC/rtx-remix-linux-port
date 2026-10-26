@@ -21,3 +21,5 @@ exists but reports unsupported.
 | Remix menu input | pending (Phase C/D) | Needs input forwarding from the mod |
 | Atlas UV-bounds wrapping, dome light opacity/blend (API 0.16 fields) | pending | Phase C |
 | Shader parity with NVIDIA's internal slang | unknown | Public slang + 2 cherry-picks; NVIDIA's 39 private commits are not public |
+| Fast Shutdown | open | `Shutdown` waits for the background shader-pipeline prewarm to finish (`RtxInitializer::waitForShaderPrewarm`, about 13 s on the 5070 with a cold cache, about 30 s on lavapipe). The pipeline compile workers cannot be cancelled, so there is no simple fix. Workaround: `RTX_ASYNC_SHADER_PREWARMING=0` makes Shutdown fast, but pipelines then compile on first use, which causes stutters. A warm driver shader cache should shorten it |
+| Destroying a mesh that live scene instances use | not handled | Such an instance draws nothing and does not crash (see PORTING_NOTES step 2) |

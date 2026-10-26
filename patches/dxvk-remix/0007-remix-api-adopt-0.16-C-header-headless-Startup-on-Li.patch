@@ -1,7 +1,7 @@
 From 2255afd750de34f4efd4564e6feed6fe648a86ba Mon Sep 17 00:00:00 2001
 From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
 Date: Mon, 26 Oct 2026 00:31:30 +0000
-Subject: [PATCH 7/7] remix api: adopt 0.16 C header, headless Startup on Linux
+Subject: [PATCH 7/8] remix api: adopt 0.16 C header, headless Startup on Linux
 
 - public/include/remix/remix_c.h is the rtx-remix-minecraft 0.16.0 header
   with the native POSIX changes. Materials and dome lights take texture
