@@ -482,3 +482,52 @@ Mod base `f2c6fda`, branch `linux-port`, series in `patches/rtx-remix-minecraft/
 - **Build:** `rtxremix-java/native/CMakeLists.txt` builds `build/native/linux64/libremixbridge.so`. It depends only on
   libstdc++, libc and libm, and every symbol must resolve at link time (`--no-undefined`). `remix_c.h` takes the
   runtime's POSIX header block.
+
+## Phase D step 2: Java on Linux (2026-10-26)
+
+**Status:** the new and changed classes compile against minimal API stubs (see below). The extraction path and
+the new bridge natives run in the container. **Nothing has run inside Minecraft, and nothing is verified on GPU.**
+
+### What changed (patch 0002)
+- **Names:** Linux x86_64 maps to `native/remix-sdk-linux64`, whose runtime is `libremix.so`. Windows keeps
+  `remix-sdk-win64`/`-arm64` and `d3d9.dll`. The bridge is loaded as `System.mapLibraryName("remixbridge")` from beside
+  the runtime.
+- **`gl/InteropHandles`:** a small class, and the only one that knows how interop handles reach GL.
+  - Windows: unchanged (`EXT_*_win32`).
+  - Linux: opaque FDs imported with LWJGL's `EXTMemoryObjectFD.glImportMemoryFdEXT` and
+    `EXTSemaphoreFD.glImportSemaphoreFdEXT`, with `GL_HANDLE_TYPE_OPAQUE_FD_EXT`.
+  - **Ownership assumption, to match with the interop branch:**
+    - A successful GL import takes the FD.
+    - The runtime keeps owning the FDs it reports, and reports the same FD while an allocation is unchanged.
+      `GlInterop` detects image changes by comparing handle values.
+    - So the class imports a `dup()` (`F_DUPFD_CLOEXEC`) and closes the dup if the import fails.
+  - If `interop-local` instead hands out a fresh FD per `GetInteropInfo` call, change `importFd()` to pass the FD
+    itself, and stop comparing handle values in `GlInterop.InteropImage.recreate`.
+- **`LinuxPresent`:**
+  - There is no HWND on Linux.
+  - The framebuffer size goes to the runtime through the new bridge call `linuxSetOutputSize`
+    (`remixlinux_SetWindowSize`), before Startup and after every present.
+  - `presentFrameVk` passes `skipVulkanSwapchain = 1`. GLFW then swaps the composited GL back buffer, also after a
+    failed Remix present. This is the presentFrameVk change approved in Phase B. The GL→interop copy still runs, so
+    the client-done semaphore protocol is the same as on Windows.
+- **Bridge natives:** `linuxSetOutputSize`, `posixDupFd`, `posixCloseFd`. On Windows they fail or do nothing.
+
+### Checks in the container
+- **Compile checks:**
+  - The changed classes are type-checked with `javac` against minimal stubs: `GlInterop`, `InteropHandles`,
+    `LinuxPresent`, `NativeExtractor` and all of `rtxremix-java`.
+  - The stubs cover only the LWJGL, SLF4J, Minecraft `Window` and Fabric loader members these classes use. Their
+    signatures follow the LWJGL 3.3 API but were written by hand, not taken from the jars.
+  - The real jars could not be fetched: the environment blocks maven.fabricmc.net, Mojang and Gradle's distribution
+    host, and fetching third-party jars from Maven Central was not allowed in this session.
+  - `RemixRenderer` and `RtxRemixMod` were not compiled at all. Their changes are small and were reviewed by eye.
+- **Extraction:** a Linux-layout payload extracts, and is re-extracted after `libremix.so` is deleted
+  (stubbed Fabric loader).
+- **Natives** (`tests/java/LinuxNativesSmoke.java`, real runtime on lavapipe):
+  - `linuxSetOutputSize(800,600)` before Startup makes the headless swapchain 800×600.
+  - Invalid sizes are rejected, and dup/close work.
+- **Tests:** `NativeExtractorTest` has cases for the OS mapping and the runtime file names. It was not run, because
+  JUnit could not be fetched either.
+
+### Known gaps for the mod on Linux
+- `RemixInputGate` and the packaged `rtx.conf` hotkey chord were written for Windows input. Not reviewed yet.
