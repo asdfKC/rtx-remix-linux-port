@@ -237,3 +237,18 @@ meson 1.12, slang v2025.10.4 plus patches, glslang 15.1, SPIRV-Tools 2025.1).
 - **ImGui input:** the Remix menus need input forwarded from the mod (GLFW).
 - `libNRD.so` (decision above).
 - Linux has no share-deny file locks, so a texture another process is still writing is not detected.
+
+---
+
+## Hardware result: RTX 5070, reported by the user (2026-10-26)
+
+Arch Linux, NVIDIA proprietary driver **615.78.08**, run with `DXVK_REMIX_NVIDIA_MIN_DRIVER=600`.
+- **Vulkan device creation passes** on the RTX 5070 with ray tracing, opacity micromaps (OMM),
+  shader execution reordering (SER) and NRC reported supported.
+  The FD external memory/semaphore extensions are enabled.
+- `Startup` then fails at `Presenter: window surfaces are not supported by the headless Linux runtime`,
+  as designed. That is the Phase C step 1 target.
+- Side items reported, not yet fixed:
+  1. The minimum-driver check uses Windows driver numbering. Linux needs its own threshold, and the env override is a workaround.
+  2. The DLSS libraries are not copied next to `libremix.so`.
+  3. Blackwell is detected as Turing (low priority, probably from the NVAPI stub fallback).
