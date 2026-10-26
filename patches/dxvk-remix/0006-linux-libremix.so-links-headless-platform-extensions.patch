@@ -1,7 +1,7 @@
 From 50c58ef6884bba0dc5fcb4815c4389c6603e52d4 Mon Sep 17 00:00:00 2001
 From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
 Date: Sun, 25 Oct 2026 23:24:31 +0000
-Subject: [PATCH 6/6] linux: libremix.so links; headless platform extensions,
+Subject: [PATCH 6/7] linux: libremix.so links; headless platform extensions,
  export map, stubs
 
 - libremix.so links on Linux x86_64 and exports only remixapi_* and

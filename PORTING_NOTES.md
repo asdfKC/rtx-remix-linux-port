@@ -252,3 +252,50 @@ Arch Linux, NVIDIA proprietary driver **615.78.08**, run with `DXVK_REMIX_NVIDIA
   1. The minimum-driver check uses Windows driver numbering. Linux needs its own threshold, and the env override is a workaround.
   2. The DLSS libraries are not copied next to `libremix.so`.
   3. Blackwell is detected as Turing (low priority, probably from the NVAPI stub fallback).
+
+---
+
+## Phase C step 1: 0.16 API header and headless Startup (2026-10-26)
+
+**Status:** compiles, links, and passes a software-Vulkan smoke test (Mesa lavapipe in the build container).
+**Not verified on GPU.**
+
+### What changed
+- **ABI.** The runtime's `public/include/remix/remix_c.h` is now the mod's **0.16.0** header, plus the POSIX
+  changes from `tools/port_remix_c_h.py`. `InitializeLibrary` accepts 0.16 (exact-minor rule) and fills **all 36**
+  interface entries. Sizes match the header: `remixapi_Interface` 288 bytes, `remixapi_StartupInfo` 48, `remixapi_PresentInfo` 48.
+- **New entry points.**
+  - `Submit`, `SceneInstance*`, `CreateTextureFrom*`, `UpdateTextureFromMemory`, `DestroyTexture`,
+    `UpdateMaterial` and `dxvk_GetInteropInfo` log once and return `GENERAL_FAILURE`, until steps 2 and 3 and
+    the interop work. None is left null.
+  - **Config layers are stubbed:** `AcquireConfigLayer` returns a distinct, reference-counted handle and
+    logs that the layer is ignored. Blending and release succeed. Layer option values do not apply.
+  - `GetConfigVariableResolved` is implemented for registered options, with the size-query and
+    `BUFFER_TOO_SMALL` contract. Dynamic-namespace keys return `GENERAL_FAILURE`.
+- **Material and dome-light textures** are `remixapi_TextureHandle`s in 0.16. They resolve through an API
+  texture registry that step 3 fills, so materials currently render untextured. The 0.6.6 texture-transform
+  fields are gone from the 0.16 structs, so the defaults apply.
+- **Headless Startup (Linux).**
+  - Always uses `D3D9SwapchainExternal` (the HdRemix-style swapchain).
+  - The swapchain base never creates a `vk::Presenter` or VkSurface.
+  - `Present` blits the final output into an internal back buffer and submits.
+  - The external `frameEnd`/`frameResume` semaphore handshake only runs once a client calls
+    `dxvk_GetExternalSwapchain`. Otherwise nothing would signal `frameResume`, and every frame would wait forever.
+  - A null `hwnd` becomes a token, because ImGui and the swapchain skip their work without a window handle.
+- **Output size:** new export `remixlinux_SetWindowSize(w, h)`. Use it before `Startup` and on resize; `Present`
+  resets the back buffers when it changes. The fallback is `REMIX_LINUX_WINDOW_SIZE=WxH`, then 1920x1080.
+  The mod's JNI bridge must call it (Phase D).
+
+### Test (`tests/startup_remix.c`, lavapipe)
+`InitializeLibrary(0.16.0)` → `remixlinux_SetWindowSize(640,360)` → `Startup` → 3× `Present(skipVulkanSwapchain=1)`
+→ `Shutdown`: **all return SUCCESS** (`evidence/phaseC1-headless-lavapipe.log`).
+`Shutdown` takes about 30 s on lavapipe. It waits for the background shader-pipeline prewarm
+(`RtxInitializer::waitForShaderPrewarm`), which lavapipe compiles on the CPU. Expect this to be far shorter
+on the 5070, but please check it.
+
+### Semantic gaps noted, not addressed in this step
+- `SetConfigVariable` writes to the User layer (0.6.6 behaviour). 0.16 routes NoSave options such as
+  `rtx.showUI` to the Derived layer, and the mod's input gate relies on that, so closing the native menu may
+  not stick. Revisit with the input-forwarding work.
+- `PresentInfo.skipVulkanSwapchain`, `interopFlipY`, `clientDoneSemaphore_ValueToWait` and
+  `StartupInfo.interopImage` are accepted and ignored until the interop work.
