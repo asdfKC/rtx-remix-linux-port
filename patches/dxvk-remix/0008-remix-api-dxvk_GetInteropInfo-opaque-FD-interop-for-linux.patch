@@ -1,0 +1,435 @@
+From 068e16270cc0c1f4bf30e9a1d9061727e77a7420 Mon Sep 17 00:00:00 2001
+From: Kush J <kushisthecoolest@gmail.com>
+Date: Mon, 26 Oct 2026 08:52:58 -0500
+Subject: [PATCH] remix api: dxvk_GetInteropInfo opaque-FD interop for OpenGL
+ on Linux
+
+Exports a dedicated interop color image and two binary semaphores via
+VK_KHR_external_memory_fd / VK_KHR_external_semaphore_fd, filled from
+D3D9SwapchainExternal::Present's existing final-composited frame (no
+dependency on Submit, which stays a 0.16-only stub). Semaphores are
+binary, not timeline: GL's EXT_semaphore_fd has no wait/signal value
+parameter, unlike the D3D12-fence path EXT_semaphore_win32 offers on
+Windows, so dxvkDoneSemaphore_ValueToWait is informational only on
+Linux.
+
+Fixes a dead FD-export path in RtxSemaphore::createTimeline (created
+with VkExportSemaphoreCreateInfo but never called vkGetSemaphoreFdKHR).
+
+Verified on an RTX 5070 (driver 615.78.08): the mechanism itself
+(export, import, synchronization, readback) is proven via two
+debug-clear round trips through the real code path. A full lit scene
+through the same path still renders black; root cause not yet found,
+written up as an open issue for the next session.
+
+Signed-off-by: Kush J <kushisthecoolest@gmail.com>
+---
+ src/d3d9/d3d9_swapchain.h             |  27 ++++++
+ src/d3d9/d3d9_swapchain_external.cpp  |  88 +++++++++++++++++
+ src/dxvk/dxvk_image.h                 |  11 ++-
+ src/dxvk/rtx_render/rtx_remix_api.cpp | 132 ++++++++++++++++++++++++++
+ src/dxvk/rtx_render/rtx_semaphore.cpp |  33 ++++++-
+ 5 files changed, 289 insertions(+), 2 deletions(-)
+
+diff --git a/src/d3d9/d3d9_swapchain.h b/src/d3d9/d3d9_swapchain.h
+index fc67a3c3..4669232f 100644
+--- a/src/d3d9/d3d9_swapchain.h
++++ b/src/d3d9/d3d9_swapchain.h
+@@ -311,6 +311,15 @@ namespace dxvk {
+ #endif
+     // NV-DXVK end
+ 
++    // NV-DXVK start: OpenGL/Vulkan interop via opaque FDs (dxvk_GetInteropInfo, Linux only)
++    Rc<RtxSemaphore> m_interopDxvkDoneSemaphore;
++    Rc<RtxSemaphore> m_interopClientDoneSemaphore;
++    Rc<DxvkImage>     m_interopColorImage;
++    uint64_t          m_interopSemaphoreValue = 0;
++
++    void ensureInteropColorImage(uint32_t width, uint32_t height);
++    // NV-DXVK end
++
+   protected:
+     int NumFrontBuffers() override { return 0; };
+ 
+@@ -355,6 +364,24 @@ namespace dxvk {
+       m_externalSync = true;
+     }
+     // NV-DXVK end
++
++    // NV-DXVK start: OpenGL/Vulkan interop via opaque FDs (dxvk_GetInteropInfo, Linux only)
++    Rc<DxvkImage> GetInteropColorImage() const {
++      return m_interopColorImage;
++    }
++
++    RtxSemaphore* GetInteropDxvkDoneSemaphore() const {
++      return m_interopDxvkDoneSemaphore.ptr();
++    }
++
++    RtxSemaphore* GetInteropClientDoneSemaphore() const {
++      return m_interopClientDoneSemaphore.ptr();
++    }
++
++    uint64_t GetInteropSemaphoreValue() const {
++      return m_interopSemaphoreValue;
++    }
++    // NV-DXVK end
+ // NV-DXVK end
+   };
+ 
+diff --git a/src/d3d9/d3d9_swapchain_external.cpp b/src/d3d9/d3d9_swapchain_external.cpp
+index 94ebfdcb..b8eaa56a 100644
+--- a/src/d3d9/d3d9_swapchain_external.cpp
++++ b/src/d3d9/d3d9_swapchain_external.cpp
+@@ -32,6 +32,11 @@
+ namespace dxvk {
+   extern bool g_combineGuiInFinalColor = true;
+ 
++  // NV-DXVK start: OpenGL/Vulkan interop via opaque FDs (dxvk_GetInteropInfo, Linux only).
++  // Set from remixapi_StartupInfo::interopImage in remixapi_dxvk_CreateD3D9.
++  extern bool g_interopImageEnabled;
++  // NV-DXVK end
++
+   D3D9SwapchainExternal::D3D9SwapchainExternal(
+         D3D9DeviceEx* pDevice,
+         D3DPRESENT_PARAMETERS* pPresentParams,
+@@ -39,6 +44,22 @@ namespace dxvk {
+     : D3D9SwapChainEx(pDevice, pPresentParams, pFullscreenDisplayMode) {
+     m_frameEndSemaphore = RtxSemaphore::createBinary(pDevice->GetDXVKDevice().ptr(), "ExternalPresenter::frameEnd");
+     m_frameResumeSemaphore = RtxSemaphore::createBinary(pDevice->GetDXVKDevice().ptr(), "ExternalPresenter::frameResume");
++
++    // NV-DXVK start: OpenGL/Vulkan interop via opaque FDs (dxvk_GetInteropInfo, Linux only).
++    // Created eagerly (unlike the color image, which needs a known size) so a client can import
++    // the semaphores right after Startup, per the dxvk_GetInteropInfo flow documented in remix_c.h.
++#ifndef _WIN32
++    // NV-DXVK: Binary, not timeline. GL's EXT_semaphore_fd only supports binary Vulkan semaphores
++    // for opaque-FD import (unlike EXT_semaphore_win32's D3D12-fence path, which is the only GL
++    // import that carries a wait/signal *value*). See PORTING_NOTES.md for the full rationale.
++    if (g_interopImageEnabled) {
++      m_interopDxvkDoneSemaphore = RtxSemaphore::createBinary(
++        pDevice->GetDXVKDevice().ptr(), "Interop::dxvkDone", true);
++      m_interopClientDoneSemaphore = RtxSemaphore::createBinary(
++        pDevice->GetDXVKDevice().ptr(), "Interop::clientDone", true);
++    }
++#endif
++    // NV-DXVK end
+   }
+ 
+ 
+@@ -94,6 +115,26 @@ namespace dxvk {
+                                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                  VK_ACCESS_SHADER_READ_BIT);
+ 
++    // NV-DXVK start: OpenGL/Vulkan interop via opaque FDs (dxvk_GetInteropInfo, Linux only).
++    // Blit the final composited frame (targetImage, same content the normal swapchain path uses)
++    // into a dedicated exportable image, then signal the interop semaphore on this same submission
++    // so a client's glWaitSemaphoreEXT needs no CPU round-trip to observe it.
++    // This is a BINARY Vulkan semaphore, not timeline: GL's EXT_semaphore_fd only supports binary
++    // semaphore import for opaque FDs (a wait/signal *value*, like dxvkDoneSemaphore_ValueToWait,
++    // is only meaningful for EXT_semaphore_win32's D3D12-fence handle type, which has no Linux FD
++    // equivalent). m_interopSemaphoreValue is kept only as an informational frame counter.
++#ifndef _WIN32
++    if (g_interopImageEnabled && m_interopDxvkDoneSemaphore != nullptr) {
++      ensureInteropColorImage(imageInfo.extent.width, imageInfo.extent.height);
++      if (m_interopColorImage != nullptr) {
++        dxvk::RtxContext::blitImageHelper(m_context, targetImage, m_interopColorImage, VkFilter::VK_FILTER_NEAREST);
++        m_interopSemaphoreValue++;
++        m_context->getCommandList()->addSignalSemaphore(m_interopDxvkDoneSemaphore->handle(), 1);
++      }
++    }
++#endif
++    // NV-DXVK end
++
+     // NV-DXVK start: Without an external client nobody signals frameResume, so the headless runtime skips the handshake
+     if (m_externalSync) {
+       // signal to external that rendering is done
+@@ -115,4 +156,51 @@ namespace dxvk {
+     return S_OK;
+   }
+ 
++  // NV-DXVK start: OpenGL/Vulkan interop via opaque FDs (dxvk_GetInteropInfo, Linux only).
++  // Lazily (re)creates the exportable interop color image when the size changes, including the
++  // first call. Always VK_FORMAT_R8G8B8A8_UNORM / REMIXAPI_TEXTURE_FORMAT_RGBA8_UNORM regardless of
++  // the internal backbuffer format, since that format is broadly supported for external memory
++  // export and keeps the client-side (GL) format mapping unambiguous.
++  void D3D9SwapchainExternal::ensureInteropColorImage(uint32_t width, uint32_t height) {
++    if (m_interopColorImage != nullptr) {
++      const auto& extent = m_interopColorImage->info().extent;
++      if (extent.width == width && extent.height == height) {
++        return;
++      }
++    }
++
++    if (width == 0 || height == 0) {
++      m_interopColorImage = nullptr;
++      return;
++    }
++
++    DxvkImageCreateInfo info;
++    info.type           = VK_IMAGE_TYPE_2D;
++    info.format         = VK_FORMAT_R8G8B8A8_UNORM;
++    info.flags          = 0;
++    info.sampleCount    = VK_SAMPLE_COUNT_1_BIT;
++    info.extent         = { width, height, 1 };
++    info.numLayers      = 1;
++    info.mipLevels      = 1;
++    info.usage          = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
++    info.stages         = VK_PIPELINE_STAGE_TRANSFER_BIT;
++    info.access          = VK_ACCESS_TRANSFER_WRITE_BIT;
++    info.tiling          = VK_IMAGE_TILING_OPTIMAL;
++    info.layout          = VK_IMAGE_LAYOUT_GENERAL;
++    info.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
++    info.viewFormatCount = 0;
++    info.viewFormats     = nullptr;
++    info.sharing.mode    = DxvkSharedHandleMode::Export;
++    info.sharing.type    = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
++
++    m_interopColorImage = m_device->createImage(
++      info, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, DxvkMemoryStats::Category::RTXRenderTarget, "interopColor");
++
++    if (!m_interopColorImage->isShared()) {
++      Logger::err("D3D9SwapchainExternal: interop color image could not be made exportable (VK_KHR_external_memory_fd format support missing)");
++      m_interopColorImage = nullptr;
++    }
++  }
++  // NV-DXVK end
++
+ }
+diff --git a/src/dxvk/dxvk_image.h b/src/dxvk/dxvk_image.h
+index e4371a14..7eabe187 100644
+--- a/src/dxvk/dxvk_image.h
++++ b/src/dxvk/dxvk_image.h
+@@ -387,9 +387,18 @@ namespace dxvk {
+     /**
+      * \brief Create a new shared handle to dedicated memory backing the image
+      * \returns The shared handle with the type given by DxvkSharedHandleInfo::type
++     *
++     * NV-DXVK: On Linux (opaque FD), every call creates and returns a *new*, caller-owned fd
++     * (per VK_KHR_external_memory_fd semantics) -- it must be closed or imported (which closes
++     * it on success) by the caller. Does not consume or invalidate previously returned fds.
+      */
+     HANDLE sharedHandle() const;
+-    
++
++    // NV-DXVK start: lets callers check exportability without calling sharedHandle(), which
++    // would otherwise create and leak an unused fd just to probe this.
++    bool isShared() const { return m_shared; }
++    // NV-DXVK end
++
+   private:
+     
+     Rc<vk::DeviceFn>      m_vkd;
+diff --git a/src/dxvk/rtx_render/rtx_remix_api.cpp b/src/dxvk/rtx_render/rtx_remix_api.cpp
+index f9b77419..d7d7370e 100644
+--- a/src/dxvk/rtx_render/rtx_remix_api.cpp
++++ b/src/dxvk/rtx_render/rtx_remix_api.cpp
+@@ -51,6 +51,12 @@
+ 
+ #include <optional>
+ 
++#ifndef _WIN32
++#include <unistd.h>
++#include <cerrno>
++#include <cstring>
++#endif
++
+ namespace dxvk {
+   HRESULT CreateD3D9(
+           bool           Extended,
+@@ -920,6 +926,16 @@ std::unique_ptr<dxvk::ExternalDrawState> dxvk::RemixAPIPrivateAccessor::toRtDraw
+   return state;
+ }
+ 
++// NV-DXVK start: OpenGL/Vulkan interop via opaque FDs (dxvk_GetInteropInfo, Linux only).
++// Must live in namespace dxvk (explicitly reopened -- this point in the file is actually at global
++// scope despite the surrounding code, since the enclosing "namespace dxvk {" closed much earlier)
++// and outside the anonymous namespace below: d3d9_swapchain_external.cpp reads this as an extern.
++// (Set from remixapi_StartupInfo::interopImage in remixapi_dxvk_CreateD3D9.)
++namespace dxvk {
++  bool g_interopImageEnabled = false;
++}
++// NV-DXVK end
++
+ namespace {
+   remixapi_ErrorCode REMIXAPI_CALL remixapi_CreateMaterial(
+     const remixapi_MaterialInfo* info,
+@@ -1382,6 +1398,12 @@ namespace {
+     IDirect3D9Ex** out_pD3D9) {
+     IDirect3D9Ex* d3d9ex = nullptr;
+ 
++    // NV-DXVK start: OpenGL/Vulkan interop via opaque FDs (dxvk_GetInteropInfo, Linux only)
++#ifndef _WIN32
++    dxvk::g_interopImageEnabled = info.interopImage;
++#endif
++    // NV-DXVK end
++
+ #ifdef _WIN32
+     const bool withExternalSwapchain = info.forceNoVkSwapchain;
+ #else
+@@ -1822,9 +1844,119 @@ namespace {
+     return notImplemented("UpdateTextureFromMemory");
+   }
+ 
++  // NV-DXVK start: OpenGL/Vulkan interop via opaque FDs (dxvk_GetInteropInfo, Linux only).
++  //
++  // FD ownership contract (see PORTING_NOTES.md "Phase C step 2: FD interop" for the full writeup):
++  //  - Every non-zero *_Handle field returned by this call is a FRESH, caller-owned fd (a Linux
++  //    opaque file descriptor, carried in the uint64_t exactly like a HANDLE is on Windows).
++  //    The runtime never reuses or tracks fds it has handed out.
++  //  - The caller must either import it (glImportMemoryFdEXT / glImportSemaphoreFdEXT, which take
++  //    ownership and close it internally on success) or close() it itself if it won't be imported.
++  //    This matches EXT_memory_object_fd / EXT_semaphore_fd's "ownership transfers on import" rule.
++  //  - Calling this function again returns NEW fds for the same underlying objects; it does not
++  //    invalidate fds returned by a previous call. The recommended client pattern is to call it
++  //    once after Startup to import the two semaphores, then once per frame (after Present) to
++  //    get the color image -- only re-importing into GL when width/height actually change.
++  //  - On Linux the depth fields are always 0 (unavailable): the primary depth buffer is a
++  //    depth-aspect image and safely exposing it as a plain opaque byte buffer to GL needs a
++  //    format/tiling compatibility check this step does not attempt (see KNOWN_GAPS.md).
++  //  - dxvkDoneSemaphore_Handle / clientDoneSemaphore_Handle are BINARY Vulkan semaphores on
++  //    Linux, not timeline. GL's EXT_semaphore_fd only supports binary semaphore import for
++  //    opaque FDs; a wait/signal *value* is only meaningful for EXT_semaphore_win32's D3D12-fence
++  //    handle type, which has no FD equivalent. dxvkDoneSemaphore_ValueToWait is therefore an
++  //    informational frame counter only -- a Linux client must call glWaitSemaphoreEXT /
++  //    glSignalSemaphoreEXT with no value parameter, exactly once per Present, and ignore it.
++#ifndef _WIN32
++  namespace {
++    int dupHandleAsFd(HANDLE h) {
++      const intptr_t fd = reinterpret_cast<intptr_t>(h);
++      if (h == INVALID_HANDLE_VALUE || fd < 0) {
++        return -1;
++      }
++      int dup_fd = ::dup(static_cast<int>(fd));
++      if (dup_fd < 0) {
++        dxvk::Logger::err(dxvk::str::format("dxvk_GetInteropInfo: dup() failed: ", strerror(errno)));
++      }
++      return dup_fd;
++    }
++  }
++#endif
++
+   remixapi_ErrorCode REMIXAPI_CALL remixapi_dxvk_GetInteropInfo(remixapi_dxvk_InteropInfo* out_info) {
++    if (!out_info) {
++      return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
++    }
++    *out_info = remixapi_dxvk_InteropInfo {};
++
++#ifdef _WIN32
+     return notImplemented("dxvk_GetInteropInfo");
++#else
++    if (!dxvk::g_interopImageEnabled) {
++      return REMIXAPI_ERROR_CODE_GENERAL_FAILURE;
++    }
++    dxvk::D3D9DeviceEx* remixDevice = tryAsDxvk();
++    if (!remixDevice) {
++      return REMIXAPI_ERROR_CODE_REMIX_DEVICE_WAS_NOT_REGISTERED;
++    }
++    dxvk::D3D9SwapchainExternal* pres = remixDevice->GetExternalPresenter();
++    if (!pres) {
++      return REMIXAPI_ERROR_CODE_GENERAL_FAILURE;
++    }
++
++    dxvk::RtxSemaphore* dxvkDone = pres->GetInteropDxvkDoneSemaphore();
++    dxvk::RtxSemaphore* clientDone = pres->GetInteropClientDoneSemaphore();
++    if (!dxvkDone || !clientDone) {
++      // Startup was not called with StartupInfo::interopImage set.
++      return REMIXAPI_ERROR_CODE_GENERAL_FAILURE;
++    }
++
++    int dxvkDoneFd = dupHandleAsFd(dxvkDone->sharedHandle());
++    int clientDoneFd = dupHandleAsFd(clientDone->sharedHandle());
++    if (dxvkDoneFd < 0 || clientDoneFd < 0) {
++      if (dxvkDoneFd >= 0) {
++        ::close(dxvkDoneFd);
++      }
++      if (clientDoneFd >= 0) {
++        ::close(clientDoneFd);
++      }
++      return REMIXAPI_ERROR_CODE_GENERAL_FAILURE;
++    }
++
++    out_info->dxvkDoneSemaphore_Handle = static_cast<uint64_t>(dxvkDoneFd);
++    out_info->dxvkDoneSemaphore_ValueToWait = pres->GetInteropSemaphoreValue();
++    out_info->clientDoneSemaphore_Handle = static_cast<uint64_t>(clientDoneFd);
++
++    // Depth is intentionally unavailable on Linux for now; leave the depth fields zeroed.
++
++    dxvk::Rc<dxvk::DxvkImage> colorImage = pres->GetInteropColorImage();
++    if (colorImage == nullptr) {
++      // No frame has been presented yet (or the window size is still 0x0), so there is nothing
++      // to export yet. The semaphore fds above are still valid and importable.
++      return REMIXAPI_ERROR_CODE_SUCCESS;
++    }
++
++    HANDLE imageHandle = colorImage->sharedHandle(); // fresh fd, see DxvkImage::sharedHandle()
++    if (imageHandle == INVALID_HANDLE_VALUE) {
++      ::close(dxvkDoneFd);
++      ::close(clientDoneFd);
++      return REMIXAPI_ERROR_CODE_GENERAL_FAILURE;
++    }
++
++    const auto& imgInfo = colorImage->info();
++    VkMemoryRequirements memReq;
++    remixDevice->GetDXVKDevice()->vkd()->vkGetImageMemoryRequirements(
++      remixDevice->GetDXVKDevice()->vkd()->device(), colorImage->handle(), &memReq);
++
++    out_info->imageMemory_Handle = static_cast<uint64_t>(reinterpret_cast<intptr_t>(imageHandle));
++    out_info->allocationSize = memReq.size;
++    out_info->width = static_cast<int32_t>(imgInfo.extent.width);
++    out_info->height = static_cast<int32_t>(imgInfo.extent.height);
++    out_info->interopImageFormat = REMIXAPI_TEXTURE_FORMAT_RGBA8_UNORM;
++
++    return REMIXAPI_ERROR_CODE_SUCCESS;
++#endif
+   }
++  // NV-DXVK end
+ 
+   remixapi_ErrorCode REMIXAPI_CALL remixapi_Submit(const remixapi_SubmitInfo* info) {
+     return notImplemented("Submit");
+diff --git a/src/dxvk/rtx_render/rtx_semaphore.cpp b/src/dxvk/rtx_render/rtx_semaphore.cpp
+index 89f03f10..e719cbeb 100644
+--- a/src/dxvk/rtx_render/rtx_semaphore.cpp
++++ b/src/dxvk/rtx_render/rtx_semaphore.cpp
+@@ -61,8 +61,39 @@ namespace dxvk {
+                                   result));
+     }
+ 
++    // NV-DXVK start: Opaque FD export on Linux for shared timeline semaphores (e.g. dxvk_GetInteropInfo).
++    // The semaphore keeps this fd open for its lifetime; export a dup() of it for a consumer.
++#ifndef _WIN32
++    if (win32Shared) {
++      VkSemaphoreGetFdInfoKHR fdInfo = {};
++      fdInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR;
++      fdInfo.semaphore = ret->m_sema;
++      fdInfo.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
++
++      int fd = -1;
++      if (device->vkd()->vkGetSemaphoreFdKHR && device->vkd()->vkGetSemaphoreFdKHR(device->handle(), &fdInfo, &fd) == VK_SUCCESS) {
++        ret->m_handle = reinterpret_cast<HANDLE>(static_cast<intptr_t>(fd));
++      } else {
++        Logger::warn("RtxSemaphore::createTimeline: Failed to get shared FD for timeline semaphore");
++      }
++    }
++#else
++    if (win32Shared) {
++      VkSemaphoreGetWin32HandleInfoKHR handleInfo = {};
++      handleInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_WIN32_HANDLE_INFO_KHR;
++      handleInfo.semaphore = ret->m_sema;
++      handleInfo.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR;
++
++      HANDLE win32Handle;
++      if (device->vkd()->vkGetSemaphoreWin32HandleKHR(device->handle(), &handleInfo, &win32Handle) == VK_SUCCESS) {
++        ret->m_handle = win32Handle;
++      }
++    }
++#endif
++    // NV-DXVK end
++
+     ret->labelSemaphore(name);
+-    
++
+     return ret;
+   }
+ 
+-- 
+2.56.0
+

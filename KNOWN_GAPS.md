@@ -21,3 +21,5 @@ exists but reports unsupported.
 | Remix menu input | pending (Phase C/D) | Needs input forwarding from the mod |
 | Atlas UV-bounds wrapping, dome light opacity/blend (API 0.16 fields) | pending | Phase C |
 | Shader parity with NVIDIA's internal slang | unknown | Public slang + 2 cherry-picks; NVIDIA's 39 private commits are not public |
+| `dxvk_GetInteropInfo` depth image | dropped (for now) | `depthImageMemory_Handle` always 0. Exposing the depth-aspect image safely as a plain GL byte buffer needs a tiling/format check not yet done |
+| Real ray-traced content through the FD interop image | **blocked, under investigation** | FD mechanism itself is verified on the 5070 (two independent debug-clear proofs); a test scene (material/mesh/light/camera via the classic immediate-mode API) renders all-black through it. See PORTING_NOTES.md Phase C step 2 "Open issue" |

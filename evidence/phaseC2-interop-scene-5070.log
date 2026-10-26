@@ -1,0 +1,281 @@
+EGL device 0 selected (EGL_NV_device_cuda present)
+EGL 1.5, vendor: NVIDIA
+GL_VENDOR:   NVIDIA Corporation
+GL_RENDERER: NVIDIA GeForce RTX 5070/PCIe/SSE2
+GL_VERSION:  4.5.0 NVIDIA 615.78.08
+GL device UUID: 03ea5d21a788d51d632f44deee6185bb
+[08:51:24.074] info:  Game: interop_gl
+[08:51:24.074] info:  DXVK_Remix: remix-main+3c683abd-linux
+[08:51:24.074] info:  System Information Report:
+[08:51:24.074] info:    CPU: (AuthenticAMD) AMD Ryzen 7 7800X3D 8-Core Processor
+[08:51:24.074] info:    Memory: 22.08 GiB / 30.46 GiB physical, 11.09 GiB / 20.00 GiB swap
+[08:51:24.074] info:    OS: Linux 7.2.9-zen1-1-zen x86_64
+[08:51:24.074] info:  Initializing RtxOptions...
+[08:51:24.075] info:  Initializing RtxOption system layers...
+[08:51:24.075] info:  Attempting to parse option layer: dxvk.conf...
+[08:51:24.075] info:  No config file found at: dxvk.conf
+[08:51:24.075] info:  Did not find app config for executable: /mnt/big/remix-test/interop_gl
+[08:51:24.075] info:  Attempting to parse option layer: rtx.conf...
+[08:51:24.075] info:  No config file found at: rtx.conf
+[08:51:24.075] info:  Attempting to parse option layer: user.conf...
+[08:51:24.075] info:  No config file found at: user.conf
+[08:51:24.075] info:  Loading environment variable overrides:
+[08:51:24.075] info:    rtx.initializer.asyncShaderPrewarming = 0 (from RTX_ASYNC_SHADER_PREWARMING)
+[08:51:24.075] info:  RtxOption system layer initialization complete.
+[08:51:24.075] info:  [RTX Neural Radiance Cache] Selected Ultra preset mode.
+[08:51:24.075] info:  Geometry asset hash rule:
+[08:51:24.075] info:  	positions
+[08:51:24.075] info:  	indices
+[08:51:24.075] info:  	geometrydescriptor
+[08:51:24.075] info:  Geometry generation hash rule:
+[08:51:24.075] info:  	positions
+[08:51:24.075] info:  	indices
+[08:51:24.075] info:  	texcoords
+[08:51:24.075] info:  	geometrydescriptor
+[08:51:24.075] info:  	vertexlayout
+[08:51:24.075] info:  	vertexshader
+[08:51:24.075] info:  Effective RtxOption values (after all config layers and migrations):
+[08:51:24.075] info:    rtx.initializer.asyncShaderPrewarming = False
+[08:51:24.075] info:    rtx.neuralRadianceCache.trainingMaxPathBounces = 9
+[08:51:24.075] info:  Built-in extension providers:
+[08:51:24.075] info:    Headless (Linux)
+[08:51:24.075] info:    OpenVR
+[08:51:24.075] info:    OpenXR
+[08:51:24.075] info:  OpenVR: could not open registry key, status 2
+[08:51:24.075] info:  OpenVR: Failed to locate module
+[08:51:24.077] info:  Enabled instance extensions:
+[08:51:24.077] info:    VK_KHR_external_memory_capabilities
+[08:51:24.077] info:    VK_KHR_external_semaphore_capabilities
+[08:51:24.077] info:    VK_KHR_get_physical_device_properties2
+[08:51:24.077] info:    VK_KHR_get_surface_capabilities2
+[08:51:24.077] info:    VK_KHR_surface
+[08:51:24.077] info:  Enabled Layer Names:
+[08:51:24.082] info:  Vulkan instance layers:
+[08:51:24.082] info:    VK_LAYER_MESA_anti_lag
+[08:51:24.082] info:    VK_LAYER_MESA_device_select
+[08:51:24.082] info:    VK_LAYER_NV_optimus
+[08:51:24.082] info:    VK_LAYER_NV_present
+[08:51:24.082] info:    VK_LAYER_VALVE_steam_fossilize_32
+[08:51:24.082] info:    VK_LAYER_VALVE_steam_fossilize_64
+[08:51:24.082] info:    VK_LAYER_VALVE_steam_overlay_32
+[08:51:24.082] info:    VK_LAYER_VALVE_steam_overlay_64
+[08:51:24.082] info:  Vulkan instance extensions:
+[08:51:24.082] info:    VK_EXT_acquire_drm_display
+[08:51:24.082] info:    VK_EXT_acquire_xlib_display
+[08:51:24.082] info:    VK_EXT_debug_report
+[08:51:24.082] info:    VK_EXT_debug_utils
+[08:51:24.082] info:    VK_EXT_direct_mode_display
+[08:51:24.082] info:    VK_EXT_display_surface_counter
+[08:51:24.082] info:    VK_EXT_layer_settings
+[08:51:24.082] info:    VK_EXT_surface_maintenance1
+[08:51:24.082] info:    VK_EXT_swapchain_colorspace
+[08:51:24.082] info:    VK_KHR_device_group_creation
+[08:51:24.082] info:    VK_KHR_display
+[08:51:24.082] info:    VK_KHR_external_fence_capabilities
+[08:51:24.082] info:    VK_KHR_external_memory_capabilities
+[08:51:24.082] info:    VK_KHR_external_semaphore_capabilities
+[08:51:24.082] info:    VK_KHR_get_display_properties2
+[08:51:24.082] info:    VK_KHR_get_physical_device_properties2
+[08:51:24.082] info:    VK_KHR_get_surface_capabilities2
+[08:51:24.082] info:    VK_KHR_portability_enumeration
+[08:51:24.082] info:    VK_KHR_surface
+[08:51:24.082] info:    VK_KHR_surface_maintenance1
+[08:51:24.083] info:    VK_KHR_surface_protected_capabilities
+[08:51:24.083] info:    VK_KHR_wayland_surface
+[08:51:24.083] info:    VK_KHR_xcb_surface
+[08:51:24.083] info:    VK_KHR_xlib_surface
+[08:51:24.083] info:    VK_LUNARG_direct_driver_loading
+[08:51:24.083] info:    VK_NV_display_stereo
+[08:51:24.083] info:  D3D9: VK_FORMAT_D16_UNORM_S8_UINT -> VK_FORMAT_D24_UNORM_S8_UINT
+[08:51:24.083] info:  NVIDIA GeForce RTX 5070:
+[08:51:24.083] info:    Driver: 615.78.8
+[08:51:24.083] info:    Vulkan: 1.4.351
+[08:51:24.083] info:    Memory Heap[0]: 
+[08:51:24.083] info:      Size: 12227 MiB
+[08:51:24.083] info:      Flags: 0x1
+[08:51:24.083] info:      Memory Type[1]: Property Flags = 0x1
+[08:51:24.083] info:      Memory Type[4]: Property Flags = 0x7
+[08:51:24.083] info:    Memory Heap[1]: 
+[08:51:24.083] info:      Size: 23390 MiB
+[08:51:24.083] info:      Flags: 0x0
+[08:51:24.083] info:      Memory Type[0]: Property Flags = 0x0
+[08:51:24.083] info:      Memory Type[2]: Property Flags = 0x6
+[08:51:24.083] info:      Memory Type[3]: Property Flags = 0xe
+[08:51:24.083] info:  Process set as DPI aware
+[08:51:24.083] info:  Device properties:
+[08:51:24.083] info:    Device name:     : NVIDIA GeForce RTX 5070
+[08:51:24.083] info:    Vendor name:     : NVIDIA
+[08:51:24.083] info:    Device ID:       : 0x2f04
+[08:51:24.083] info:    Vendor ID:       : 0x10de
+[08:51:24.083] info:    Driver version   : 615.78.8
+[08:51:24.083] info:  Enabled device extensions:
+[08:51:24.083] info:    VK_EXT_4444_formats
+[08:51:24.083] info:    VK_EXT_calibrated_timestamps
+[08:51:24.083] info:    VK_EXT_conservative_rasterization
+[08:51:24.083] info:    VK_EXT_custom_border_color
+[08:51:24.083] info:    VK_EXT_depth_clip_enable
+[08:51:24.083] info:    VK_EXT_extended_dynamic_state
+[08:51:24.083] info:    VK_EXT_memory_priority
+[08:51:24.083] info:    VK_EXT_opacity_micromap
+[08:51:24.083] info:    VK_EXT_robustness2
+[08:51:24.083] info:    VK_EXT_shader_atomic_float
+[08:51:24.083] info:    VK_EXT_shader_demote_to_helper_invocation
+[08:51:24.083] info:    VK_EXT_shader_viewport_index_layer
+[08:51:24.083] info:    VK_EXT_transform_feedback
+[08:51:24.083] info:    VK_EXT_vertex_attribute_divisor
+[08:51:24.083] info:    VK_KHR_acceleration_structure
+[08:51:24.083] info:    VK_KHR_buffer_device_address
+[08:51:24.083] info:    VK_KHR_create_renderpass2
+[08:51:24.083] info:    VK_KHR_deferred_host_operations
+[08:51:24.083] info:    VK_KHR_depth_stencil_resolve
+[08:51:24.083] info:    VK_KHR_draw_indirect_count
+[08:51:24.083] info:    VK_KHR_driver_properties
+[08:51:24.083] info:    VK_KHR_external_memory
+[08:51:24.083] info:    VK_KHR_external_memory_fd
+[08:51:24.083] info:    VK_KHR_external_semaphore
+[08:51:24.083] info:    VK_KHR_external_semaphore_fd
+[08:51:24.083] info:    VK_KHR_image_format_list
+[08:51:24.083] info:    VK_KHR_maintenance4
+[08:51:24.083] info:    VK_KHR_pipeline_library
+[08:51:24.083] info:    VK_KHR_push_descriptor
+[08:51:24.083] info:    VK_KHR_ray_query
+[08:51:24.083] info:    VK_KHR_ray_tracing_pipeline
+[08:51:24.083] info:    VK_KHR_sampler_mirror_clamp_to_edge
+[08:51:24.083] info:    VK_KHR_shader_float16_int8
+[08:51:24.083] info:    VK_KHR_shader_float_controls
+[08:51:24.083] info:    VK_KHR_swapchain
+[08:51:24.083] info:    VK_KHR_synchronization2
+[08:51:24.083] info:    VK_NVX_binary_import
+[08:51:24.083] info:    VK_NVX_image_view_handle
+[08:51:24.083] info:    VK_NV_low_latency
+[08:51:24.083] info:    VK_NV_present_metering
+[08:51:24.083] info:    VK_NV_ray_tracing_invocation_reorder
+[08:51:24.083] info:  Device features:
+[08:51:24.083] info:    robustBufferAccess                     : 1
+[08:51:24.083] info:    fullDrawIndexUint32                    : 1
+[08:51:24.083] info:    imageCubeArray                         : 1
+[08:51:24.083] info:    independentBlend                       : 1
+[08:51:24.083] info:    geometryShader                         : 1
+[08:51:24.083] info:    tessellationShader                     : 0
+[08:51:24.083] info:    sampleRateShading                      : 1
+[08:51:24.083] info:    dualSrcBlend                           : 0
+[08:51:24.083] info:    logicOp                                : 0
+[08:51:24.083] info:    multiDrawIndirect                      : 0
+[08:51:24.083] info:    drawIndirectFirstInstance              : 0
+[08:51:24.083] info:    depthClamp                             : 1
+[08:51:24.083] info:    depthBiasClamp                         : 1
+[08:51:24.083] info:    fillModeNonSolid                       : 1
+[08:51:24.083] info:    depthBounds                            : 1
+[08:51:24.083] info:    multiViewport                          : 1
+[08:51:24.083] info:    samplerAnisotropy                      : 1
+[08:51:24.083] info:    textureCompressionBC                   : 1
+[08:51:24.083] info:    occlusionQueryPrecise                  : 1
+[08:51:24.083] info:    pipelineStatisticsQuery                : 1
+[08:51:24.083] info:    vertexPipelineStoresAndAtomics         : 1
+[08:51:24.083] info:    fragmentStoresAndAtomics               : 0
+[08:51:24.083] info:    shaderImageGatherExtended              : 0
+[08:51:24.083] info:    shaderStorageImageExtendedFormats      : 0
+[08:51:24.083] info:    shaderStorageImageReadWithoutFormat    : 1
+[08:51:24.083] info:    shaderStorageImageWriteWithoutFormat   : 1
+[08:51:24.083] info:    shaderClipDistance                     : 1
+[08:51:24.083] info:    shaderCullDistance                     : 1
+[08:51:24.083] info:    shaderFloat64                          : 0
+[08:51:24.083] info:    shaderInt64                            : 1
+[08:51:24.083] info:    variableMultisampleRate                : 0
+[08:51:24.083] info:    hostQueryReset                         : 1
+[08:51:24.083] info:    scalarBlockLayout                      : 1
+[08:51:24.083] info:    uniformBufferStandardLayout            : 1
+[08:51:24.083] info:  VK_EXT_4444_formats
+[08:51:24.083] info:    formatA4R4G4B4                         : 1
+[08:51:24.083] info:    formatA4B4G4R4                         : 1
+[08:51:24.083] info:  VK_EXT_custom_border_color
+[08:51:24.083] info:    customBorderColors                     : 1
+[08:51:24.083] info:    customBorderColorWithoutFormat         : 1
+[08:51:24.083] info:  VK_EXT_depth_clip_enable
+[08:51:24.083] info:    depthClipEnable                        : 1
+[08:51:24.083] info:  VK_EXT_extended_dynamic_state
+[08:51:24.083] info:    extendedDynamicState                   : 1
+[08:51:24.083] info:  VK_EXT_memory_priority
+[08:51:24.083] info:    memoryPriority                         : 1
+[08:51:24.083] info:  VK_EXT_robustness2
+[08:51:24.083] info:    robustBufferAccess2                    : 1
+[08:51:24.083] info:    robustImageAccess2                     : 0
+[08:51:24.083] info:    nullDescriptor                         : 1
+[08:51:24.083] info:  VK_EXT_shader_demote_to_helper_invocation
+[08:51:24.083] info:    shaderDemoteToHelperInvocation         : 1
+[08:51:24.083] info:  VK_EXT_transform_feedback
+[08:51:24.083] info:    transformFeedback                      : 1
+[08:51:24.083] info:    geometryStreams                        : 0
+[08:51:24.083] info:  VK_EXT_vertex_attribute_divisor
+[08:51:24.083] info:    vertexAttributeInstanceRateDivisor     : 1
+[08:51:24.083] info:    vertexAttributeInstanceRateZeroDivisor : 1
+[08:51:24.083] info:  VK_KHR_buffer_device_address
+[08:51:24.083] info:    bufferDeviceAddress                    : 1
+[08:51:24.083] info:  Queue families:
+[08:51:24.083] info:    Graphics : 0
+[08:51:24.083] info:    Transfer : 1
+[08:51:24.083] info:    Async Compute : 2
+[08:51:24.083] info:    Present : 2
+[08:51:24.259] info:  DXVK: Read 0 valid state cache entries
+[08:51:24.259] info:  DXVK: Using 5 compiler threads
+[08:51:24.261] info:  [RTX info] Neural Radiance Cache: supported
+[08:51:24.262] err:   Unable to load NRD, this feature will be disabled
+[08:51:24.262] err:   Unable to load NRD, this feature will be disabled
+[08:51:24.262] err:   Unable to load NRD, this feature will be disabled
+[08:51:24.262] err:   Unable to load NRD, this feature will be disabled
+[08:51:24.263] err:   Unable to load NRD, this feature will be disabled
+[08:51:24.263] err:   Unable to load NRD, this feature will be disabled
+[08:51:24.263] err:   Unable to load NRD, this feature will be disabled
+[08:51:24.279] info:  NVIDIA DLSS-NR is not available in the Linux build.
+[08:51:24.279] err:   NVIDIA DLSS not available on this hardware/platform. Available: 0, availability query: (code: 0x00000001, info: NVSDK_NGX_Result_Success), feature initialization: (code: 0xbad00004, info: NVSDK_NGX_Result_FAIL_FeatureNotFound), feature initialization query: (code: 0x00000001, info: NVSDK_NGX_Result_Success)
+[08:51:24.288] info:  NVIDIA DLSS-NR is not available in the Linux build.
+[08:51:24.288] err:   NVIDIA DLSS not available on this hardware/platform. Available: 0, availability query: (code: 0x00000001, info: NVSDK_NGX_Result_Success), feature initialization: (code: 0xbad00004, info: NVSDK_NGX_Result_FAIL_FeatureNotFound), feature initialization query: (code: 0x00000001, info: NVSDK_NGX_Result_Success)
+[08:51:24.297] info:  NVIDIA DLSS-NR is not available in the Linux build.
+[08:51:24.297] err:   NVIDIA DLSS not available on this hardware/platform. Available: 0, availability query: (code: 0x00000001, info: NVSDK_NGX_Result_Success), feature initialization: (code: 0xbad00004, info: NVSDK_NGX_Result_FAIL_FeatureNotFound), feature initialization query: (code: 0x00000001, info: NVSDK_NGX_Result_Success)
+[08:51:24.314] info:  Reflex is not available in the Linux build.
+[08:51:24.325] info:  Automatic Graphics Preset in use (Set rtx.graphicsPreset to something other than Auto use a non-automatic preset)
+[08:51:24.325] info:  NVIDIA Turing architecture detected, setting default graphics settings to Low
+[08:51:24.325] info:  Automatic Raytrace Mode Preset in use (Set rtx.raytraceModePreset to something other than Auto use a non-automatic preset)
+[08:51:24.325] info:  NVIDIA architecture detected, setting default raytrace modes to Trace Ray (Indirect Integrate) and Ray Query (GBuffer, Direct Integrate)
+[08:51:24.325] info:  [RTX info] Opacity Micromap: supported
+[08:51:24.325] info:  [RTX info] Shader Execution Reordering: supported
+[08:51:24.325] info:  [RTX info] Shader Execution Reordering: enabled
+[08:51:24.325] info:  CPU supports SIMD: AVX2
+[08:51:24.336] info:  D3D9DeviceEx::ResetSwapChain:
+[08:51:24.336] info:    Requested Presentation Parameters
+[08:51:24.336] info:      - Width:              640
+[08:51:24.336] info:      - Height:             360
+[08:51:24.336] info:      - Format:             D3D9Format::Unknown
+[08:51:24.336] info:      - Auto Depth Stencil: false
+[08:51:24.336] info:                  ^ Format: D3D9Format::Unknown
+[08:51:24.336] info:      - Windowed:           true
+Startup -> 0x0
+dxvk_GetInteropInfo (semaphores) -> 0x0
+CreateMaterial -> 0x0
+CreateMesh -> 0x0
+CreateLight -> 0x0
+Present[0] -> 0x0
+Present[1] -> 0x0
+Present[2] -> 0x0
+Present[3] -> 0x0
+Present[4] -> 0x0
+Present[5] -> 0x0
+Present[6] -> 0x0
+Present[7] -> 0x0
+Present[8] -> 0x0
+Present[9] -> 0x0
+Present[10] -> 0x0
+Present[11] -> 0x0
+Present[12] -> 0x0
+Present[13] -> 0x0
+Present[14] -> 0x0
+Present[15] -> 0x0
+dxvk_GetInteropInfo (image) -> 0x0, 640x360, allocSize=983040
+glTexStorageMem2DEXT -> GL error 0x0
+glWaitSemaphoreEXT -> GL error 0x0
+FBO status -> 0x8cd5
+glReadPixels -> GL error 0x0
+pixel stats: avg=0.00 min=0 max=0
+wrote /mnt/big/remix-test/interop_final.ppm
+RESULT: SUSPECT_BLANK (avg=0.00, range=0-0)
+[08:51:24.379] err:   [40] common device objects were not disposed of.

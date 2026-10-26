@@ -298,4 +298,164 @@ on the 5070, but please check it.
   `rtx.showUI` to the Derived layer, and the mod's input gate relies on that, so closing the native menu may
   not stick. Revisit with the input-forwarding work.
 - `PresentInfo.skipVulkanSwapchain`, `interopFlipY`, `clientDoneSemaphore_ValueToWait` and
-  `StartupInfo.interopImage` are accepted and ignored until the interop work.
+  `StartupInfo.interopImage` are accepted and ignored until the interop work (done in Phase C step 2, below).
+
+---
+
+## Phase C step 2: FD interop for `dxvk_GetInteropInfo` (2026-10-26, on the RTX 5070)
+
+**Status:** the FD mechanism itself (export, import, synchronization, readback) is **verified on the
+RTX 5070** with two independent hardware proofs. A real ray-traced lit frame through it is **not yet
+achieved**; see "Open issue" below. Branch `interop-local`, patch `0008-linux-dxvk_GetInteropInfo-opaque-FD-interop.patch`.
+
+### Design
+
+The Windows 0.16 flow (`remix_c.h`'s own comment block on `remixapi_dxvk_InteropInfo`) has `Submit`
+allocate a dedicated interop image and render into it, separate from the normal D3D9 swapchain. On
+Linux there is no normal swapchain at all (the runtime is headless by design, Phase B), and `Submit`
+remains a stub (API-0.16-only, no public-source equivalent to port). Rather than build a parallel
+render path through `Submit`, the interop image is filled from the **existing, already-working**
+per-frame output: `D3D9SwapchainExternal::Present()` already produces a fully composited frame
+(raytraced output blitted into the backbuffer, then GUI/HUD composited on top, then transitioned to
+`SHADER_READ_ONLY_OPTIMAL`) every time a client calls `remix.Present()`. The interop path adds one more
+blit of that same final image into a dedicated, separately-allocated, FD-exportable
+`VK_FORMAT_R8G8B8A8_UNORM` image, then signals a semaphore on the same submission. This means the
+interop image updates on **every** `Present()`, matching the documented Windows flow's cadence (step 3
+happens once per frame), without touching `Submit` or the scene/texture/config-layer work at all.
+
+Changed files:
+- `src/dxvk/rtx_render/rtx_semaphore.cpp/.h`: `createTimeline` had an FD-export code path that was
+  dead (it created the semaphore with `VkExportSemaphoreCreateInfo` but never actually called
+  `vkGetSemaphoreFdKHR`/`vkGetSemaphoreWin32HandleKHR` to populate `m_handle`). Fixed as a general
+  correctness fix; not used by the interop semaphores themselves (see below).
+- `src/dxvk/dxvk_image.h`: added `DxvkImage::isShared()`, a non-consuming accessor for whether an
+  image ended up exportable. `sharedHandle()` creates a fresh fd on every call (per spec, see FD
+  ownership below) and would leak one if called just to probe exportability.
+- `src/d3d9/d3d9_swapchain.h` / `d3d9_swapchain_external.cpp`: `D3D9SwapchainExternal` gained the
+  interop color image, the two semaphores, and the blit+signal step in `Present()`.
+- `src/dxvk/rtx_render/rtx_remix_api.cpp`: `remixapi_dxvk_GetInteropInfo` implemented; wires
+  `StartupInfo::interopImage` through to a `g_interopImageEnabled` flag the swapchain reads (same
+  pattern as the pre-existing `g_combineGuiInFinalColor`, except correctly scoped -- see pitfall below).
+
+### Semaphores are binary, not timeline (platform-level ABI note)
+
+The header's `dxvkDoneSemaphore_ValueToWait` / `clientDoneSemaphore_ValueToWait` fields exist because
+on Windows the shared handle is (almost certainly) a D3D12 fence, importable into GL via
+`GL_EXT_semaphore_win32`'s `GL_HANDLE_TYPE_D3D12_FENCE_EXT`, which is the **only** GL semaphore import
+path that carries a wait/signal value (`GL_D3D12_FENCE_VALUE_EXT`). `GL_EXT_semaphore_fd` -- the only
+GL path for a Linux opaque fd -- has no value parameter at all; `glWaitSemaphoreEXT`/
+`glSignalSemaphoreEXT` take no value, and the imported Vulkan semaphore must be **binary**, not
+timeline. So on Linux: `dxvkDoneSemaphore_Handle`/`clientDoneSemaphore_Handle` are plain binary Vulkan
+semaphores (`RtxSemaphore::createBinary(..., shared=true)`), signaled with `addSignalSemaphore(h, 1)`
+exactly like the pre-existing `frameEnd`/`frameResume` pair `GetExternalSwapchain` already uses.
+`dxvkDoneSemaphore_ValueToWait` is reported as an informational frame counter only; a Linux client
+must ignore it and just call `glWaitSemaphoreEXT`/`glSignalSemaphoreEXT` once per `Present()`, matching
+binary-semaphore alternation (wait consumes the signal; don't call `Present()` again before waiting).
+
+### FD ownership contract
+
+- Every non-zero `*_Handle` field `dxvk_GetInteropInfo` returns is a **fresh, caller-owned fd**. The
+  runtime never reuses or tracks fds it hands out; the Vulkan driver creates a brand-new fd on every
+  `vkGetMemoryFdKHR`/`vkGetSemaphoreFdKHR` call for the same underlying object, exactly as the FD
+  variant of `VK_KHR_external_memory`/`VK_KHR_external_semaphore` specifies.
+- The caller must either import the fd (`glImportMemoryFdEXT`/`glImportSemaphoreFdEXT`, which take
+  ownership and close it internally on success) or `close()` it itself if it won't be imported.
+- Calling `dxvk_GetInteropInfo` again returns **new** fds for the same objects; it never invalidates
+  fds already returned. Recommended client pattern, matching the header's documented flow: call it
+  once right after `Startup` to import the two semaphores (valid immediately, independent of whether
+  a frame has rendered yet), then once per frame after `Present()` for the color image, re-importing
+  into GL only when width/height actually changed.
+- Depth (`depthImageMemory_Handle` etc.) is always `0` (unavailable) on Linux for now: the primary
+  depth buffer is a depth-aspect Vulkan image, and exposing it safely as a plain byte buffer to GL
+  needs a format/tiling compatibility pass this step didn't attempt. `0` is a defined, legitimate value
+  per the header ("or 0 if unavailable"), not a missing case.
+- `dxvk_GetInteropInfo` returns `GENERAL_FAILURE` if `interopImage` wasn't set in `StartupInfo`, if
+  `Startup` hasn't been called, or (image fields only) if no frame has been presented yet.
+
+### A pitfall worth recording: file-scope globals aren't always where they look like they are
+
+`rtx_remix_api.cpp` has two large anonymous-namespace blocks (`82..927`, `929..2093`) that sit at
+**global scope**, not inside `namespace dxvk {}` as the surrounding code visually suggests (the
+`namespace dxvk {}` block that's actually open at that point in the file closed at line 80). The
+pre-existing `g_combineGuiInFinalColor` -- used the same way I first wrote `g_interopImageEnabled`,
+as a bare `bool` definition dropped in near by -- is consequently **two separate variables**, one
+with internal linkage in `rtx_remix_api.cpp`'s anonymous namespace, one with external linkage in
+`dxvk::` in `d3d9_swapchain_external.cpp`; `remixapi_dxvk_CreateD3D9` setting the former never affects
+the latter. `g_interopImageEnabled` was fixed by explicitly reopening `namespace dxvk { ... }` for its
+definition and qualifying both use sites as `dxvk::g_interopImageEnabled`. Flagging
+`g_combineGuiInFinalColor` as a likely pre-existing bug (not touched here, out of scope) for whoever
+next touches `combineGuiInFinalColor`/GUI compositing.
+
+### Verified on the RTX 5070
+
+Driver 615.78.08, `DXVK_REMIX_NVIDIA_MIN_DRIVER=600`, PRIME offload env vars (see BUILD_LINUX.md).
+`tests/interop_gl.c` (build: `tests/build_interop_gl.sh`) creates a surfaceless EGL/GL 4.5 context
+pinned to the NVIDIA GPU via `EGL_EXT_platform_device` (`eglQueryDevicesEXT` + matching
+`EGL_NV_device_cuda` in the device's extension string -- robust against the AMD iGPU driving the
+display under PRIME, no window-system dependency), confirms `GL_VENDOR`/`GL_RENDERER` landed on the
+5070, confirms `GL_EXT_memory_object_fd`/`GL_EXT_semaphore_fd` are advertised (via `glGetStringi`,
+since `glGetString(GL_EXTENSIONS)` is empty on a core profile), then:
+
+1. **`Startup(interopImage=1)` -> `dxvk_GetInteropInfo` -> import both semaphores**: returns
+   `SUCCESS` with two non-zero fds (`evidence/phaseC2-interop-*-5070.log`, every run).
+2. **Mechanism proof A** (`REMIX_INTEROP_DEBUG_CLEAR=1`, a since-removed one-line debug branch that
+   filled the interop image directly with `vkCmdClearColorImage` to opaque magenta instead of
+   blitting): `dxvk_GetInteropInfo` -> import the image via `glImportMemoryFdEXT` +
+   `glTexStorageMem2DEXT` (`GL_OPTIMAL_TILING_EXT`, matching the Vulkan image's `VK_IMAGE_TILING_OPTIMAL`)
+   -> `glWaitSemaphoreEXT` -> `glReadPixels`: **exact magenta (255,0,255) read back**
+   (`evidence/phaseC2-interop-debugclear-image-5070.{log,ppm}`). Proves memory export/import,
+   tiling/format, semaphore wait, and readback are all correct.
+3. **Mechanism proof B** (`REMIX_INTEROP_DEBUG_CLEAR=2`, clearing the blit *source* -- the same
+   `targetImage` the normal swapchain path uses -- to magenta immediately before the real
+   `blitImageHelper` call runs): **exact magenta read back again**
+   (`evidence/phaseC2-interop-debugclear-blit-5070.{log,ppm}`). Proves the blit step itself, end to
+   end, through the exact code path a real frame uses.
+4. **Full scene test** (`tests/interop_gl.c` as committed, no debug flag): `CreateMaterial`
+   (emissive, `albedoConstant`), `CreateMesh` (a quad), `CreateLight` (sphere), `SetupCamera`
+   (`CameraInfoParameterizedEXT`), 16x `{SetupCamera, DrawInstance, DrawLightInstance, Present}` ->
+   `dxvk_GetInteropInfo` -> import -> wait -> read back: **all-zero** (not garbage, not noise -- a
+   clean, reproducible all-black 640x360) (`evidence/phaseC2-interop-scene-5070.{log,ppm}`).
+
+### Open issue: the test scene renders as pure black
+
+(2) and (3) together leave only one place left for this to go wrong: Remix's renderer is writing an
+all-black `targetImage` for this scene, i.e. this is a rendering/scene-setup issue, not an interop
+issue. Candidates not yet ruled out, in rough order of suspicion:
+- A gap specific to the **headless runtime's** handling of the classic immediate-mode API
+  (`DrawInstance`/`DrawLightInstance`/`SetupCamera`) with **real** geometry -- every existing
+  headless test (Phase B/C step 1) only ever exercised an *empty* scene, so this exact combination
+  (classic API + a textured/lit instance + headless swapchain) has never been exercised on Linux
+  before this session.
+- Frame-id bookkeeping: `RtCamera::isValid()` compares against `DxvkDevice::getCurrentFrameId()`,
+  which is backed by `QueuePresentCount`, incremented only by the real presenter's `presentImage()`
+  -- which the headless path never calls (it bypasses `vk::Presenter` entirely, per Phase B). The
+  counter is likely frozen at a constant value for the whole headless session. Traced through by hand
+  this looked self-consistent (camera and check read the same frozen value), but it was not verified
+  with instrumentation, and a frozen frame counter is exactly the kind of thing that breaks an
+  invariant nobody had reason to check before.
+- Light sampling (NEE/ReSTIR/RTXDI) needing more warmup frames than the 16 tried, though the
+  emissive-material variant (self-lit, independent of light sampling) came back equally black, which
+  argues against this.
+- Something about the quad's winding/orientation -- tried `doubleSided=1` to rule this out, no change.
+
+Ruled out: GL landing on the wrong GPU (checked, confirmed 5070), `GL_EXTENSIONS` query method (was a
+real bug, fixed, see commit), alpha test rejecting the surface (`alphaTestType=7` is
+`VK_COMPARE_OP_ALWAYS`, correct), tone mapping/auto-exposure clipping (tried `emissiveIntensity` up to
+100000, still exactly zero, not just dim).
+
+### What the cloud session needs for the Minecraft/JNI side
+
+- `dxvk_GetInteropInfo`'s `dxvkDoneSemaphore_Handle`, `clientDoneSemaphore_Handle`,
+  `imageMemory_Handle` are Linux fds (`int`, widened to `uint64_t`), not Win32 `HANDLE`s. Each is
+  fresh per call and must be `close()`d or imported (which closes it) -- see "FD ownership contract".
+- The semaphores are **binary**, not timeline, on Linux (see above) -- the Java/LWJGL `GlInterop`
+  FD port must not attempt to set a wait/signal value on them; a bare `glWaitSemaphoreEXT`/
+  `glSignalSemaphoreEXT` per frame is correct and sufficient.
+- Depth is always unavailable (`depthImageMemory_Handle == 0`) for now.
+- The interop image is always `REMIXAPI_TEXTURE_FORMAT_RGBA8_UNORM`, `VK_IMAGE_TILING_OPTIMAL` --
+  import with `GL_TEXTURE_TILING_EXT = GL_OPTIMAL_TILING_EXT` before `glTexStorageMem2DEXT`, or the
+  import will fail outright (confirmed while building the test: omitting this causes a GL error).
+- Nothing about the Minecraft integration itself was touched or assumed beyond what the public
+  `remix_c.h` comment block documents; the mod repo was not cloned this session (GitHub access was
+  down for this tool run), so cross-check `rtxremix-java/native/remixbridge.cpp` and
+  `GlInterop.java`'s actual call sites against this writeup before porting them.
