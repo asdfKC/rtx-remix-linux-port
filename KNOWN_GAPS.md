@@ -28,3 +28,5 @@ exists but reports unsupported.
 | sRGB interpretation of RGBA8_UNORM color textures | open question | Sampled as linear per the 0.16 header. `REMIX_LINUX_COLOR_UNORM_AS_SRGB=1` switches it for comparison on GPU |
 | `CreateTextureFromFile` decode errors | asynchronous | A missing path fails straight away. A file that exists but does not decode gives a valid, empty (untextured) handle and an error in the log |
 | Materials created before their textures | untextured | Texture handles resolve when the material is created on the CS thread. The mod creates textures first |
+| `dxvk_GetInteropInfo` depth image | dropped (for now) | `depthImageMemory_Handle` always 0. Exposing the depth-aspect image safely as a plain GL byte buffer needs a tiling/format check not yet done |
+| Real ray-traced content through the FD interop image | **blocked, under investigation** | FD mechanism itself is verified on the 5070 (two independent debug-clear proofs); a test scene (material/mesh/light/camera via the classic immediate-mode API) renders all-black through it. See PORTING_NOTES.md Phase D step 5 "Open issue" |
