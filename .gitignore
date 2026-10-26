@@ -1,1 +1,3 @@
 /scavenge/
+# Written into the working directory by the runtime when a test loads libremix.so from here
+metrics.txt
