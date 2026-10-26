@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs RTX Remix for Minecraft 1.21.1 on Linux into a Prism Launcher instance:
 # Fabric Loader + Fabric API + the mod JAR, which bundles the native Linux runtime
-# (libremix.so, DLSS libraries) and the JNI bridge (libremixbridge.so).
+# (libremix.so; the DLSS libraries only with --dlss) and the JNI bridge (libremixbridge.so).
 #
 # Usage: scripts/install.sh [options]
 #   --work DIR            work directory of scripts/build-runtime.sh (default /mnt/big/rtx-remix-linux)
@@ -12,6 +12,8 @@
 #   --fabric-api-jar FILE install this Fabric API JAR instead of resolving it with Gradle
 #   --min-driver N        DXVK_REMIX_NVIDIA_MIN_DRIVER for the instance (default 600, 0 = not set)
 #   --reset-mod           recreate the mod checkout's linux-port branch from the pinned commit
+#   --dlss                also bundle the DLSS libraries and enable NGX (REMIX_LINUX_ENABLE_NGX=1).
+#                         Off by default: NGX init faults on Linux (PORTING_NOTES, Phase D step 7)
 #
 # Needs only official Arch packages, and never runs pacman or sudo itself. What it
 # downloads, all from the repositories' own pins: the mod source from GitHub; Gradle 9.3.1
@@ -29,6 +31,7 @@ MOD_JAR=
 FABRIC_API_JAR=
 MIN_DRIVER=600
 RESET_MOD=0
+DLSS=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -40,6 +43,7 @@ while [ $# -gt 0 ]; do
     --fabric-api-jar) FABRIC_API_JAR="$(realpath "$2")"; shift 2 ;;
     --min-driver) MIN_DRIVER="$2"; shift 2 ;;
     --reset-mod) RESET_MOD=1; shift ;;
+    --dlss) DLSS=1; shift ;;
     -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
@@ -117,7 +121,9 @@ if [ -z "$MOD_JAR" ]; then
   log "Building the mod JAR (first run downloads Gradle, Minecraft and Fabric; takes a while)"
   gradle_args=(--no-daemon)
   [ "$SKIP_TESTS" = 1 ] && gradle_args+=(-x test)
-  (cd "$MOD_DIR" && ./gradlew "${gradle_args[@]}" stageLinuxRuntime -PlinuxRuntime="$RUNTIME")
+  stage_args=(-PlinuxRuntime="$RUNTIME")
+  [ "$DLSS" = 1 ] && stage_args+=(-PlinuxDlss=true)
+  (cd "$MOD_DIR" && ./gradlew "${gradle_args[@]}" stageLinuxRuntime "${stage_args[@]}")
   (cd "$MOD_DIR" && ./gradlew "${gradle_args[@]}" package stageFabricApi)
   MOD_JAR=$(ls -t "$MOD_DIR"/build/distributions/rtx-remix-renderer-*-linux64.jar 2>/dev/null | head -1)
   [ -n "$MOD_JAR" ] || die "No packaged JAR in $MOD_DIR/build/distributions"
@@ -172,10 +178,17 @@ set_cfg JvmArgs "$JVM_ARGS"
 set_cfg OverrideMemory true
 set_cfg MinMemAlloc 512
 set_cfg MaxMemAlloc 2048
-if [ "$MIN_DRIVER" != 0 ]; then
-  # The runtime's NVIDIA driver minimum is not Linux-aware yet (KNOWN_GAPS.md).
+# Environment for the game, through Prism's wrapper command.
+wrapper_env=()
+# The runtime's NVIDIA driver minimum is not Linux-aware yet (KNOWN_GAPS.md).
+[ "$MIN_DRIVER" != 0 ] && wrapper_env+=("DXVK_REMIX_NVIDIA_MIN_DRIVER=$MIN_DRIVER")
+[ "$DLSS" = 1 ] && wrapper_env+=(REMIX_LINUX_ENABLE_NGX=1)
+if [ ${#wrapper_env[@]} -gt 0 ]; then
   set_cfg OverrideCommands true
-  set_cfg WrapperCommand "env DXVK_REMIX_NVIDIA_MIN_DRIVER=$MIN_DRIVER"
+  set_cfg WrapperCommand "env ${wrapper_env[*]}"
+else
+  set_cfg OverrideCommands false
+  set_cfg WrapperCommand ""
 fi
 
 # Replace earlier copies of the mod and of Fabric API in this instance only.

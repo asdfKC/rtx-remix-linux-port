@@ -56,7 +56,8 @@ scripts/install.sh --work /mnt/big/rtx-remix-linux
 1. Clones NVIDIAGameWorks/rtx-remix-minecraft at the pinned commit into `<work>/rtx-remix-minecraft`, and applies
    `patches/rtx-remix-minecraft/`.
 2. Checks `gradle-wrapper.jar` against its pinned SHA-256.
-3. Stages `<work>/build/src/d3d9/libremix.so` and the DLSS libraries (`./gradlew stageLinuxRuntime`).
+3. Stages `<work>/build/src/d3d9/libremix.so` (`./gradlew stageLinuxRuntime`). The DLSS libraries are added only
+   with `--dlss`, which also sets `REMIX_LINUX_ENABLE_NGX=1`; NGX is off by default on Linux (KNOWN_GAPS.md).
 4. Builds the JAR (`./gradlew package`) and resolves Fabric API (`stageFabricApi`).
 5. Creates or updates the Prism instance `rtx-remix-linux`: Minecraft 1.21.1, Fabric Loader 0.16.5, Java 21, the
    mod's JVM arguments, 2 GiB heap, and `DXVK_REMIX_NVIDIA_MIN_DRIVER=600` through a wrapper command.

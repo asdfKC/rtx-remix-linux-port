@@ -1,0 +1,538 @@
+From a27b3c12e6ab84979e731c007694da974d583952 Mon Sep 17 00:00:00 2001
+From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
+Date: Mon, 26 Oct 2026 23:23:50 +0000
+Subject: [PATCH] Linux interop: runtime FD contract, binary semaphores; DLSS
+ opt-in
+
+GlInterop on Linux now follows the runtime's dxvk_GetInteropInfo
+contract:
+- Every handle field of every call is a fresh, caller-owned file
+  descriptor. Each one is imported, which hands it to GL, or closed.
+  The semaphores are imported once and their later descriptors closed.
+  The image is re-imported only when its size, format or allocation
+  size changes, never because the descriptor number changed.
+- The semaphores are binary. They are plain glGenSemaphoresEXT objects
+  instead of NV timeline semaphores; glCreateSemaphoresNV returned 0 in
+  game and failed init. No timeline values are set.
+- GL_TEXTURE_TILING_EXT = GL_OPTIMAL_TILING_EXT is set before the
+  memory is bound.
+- dxvkDone is waited exactly once per Remix Present, and only after an
+  image was imported, so never before the first Present (GetInteropInfo
+  has no image then). A signal no frame consumed is consumed before the
+  next Present.
+- clientDone is never signalled: the runtime never waits on it.
+  glFinish before Present orders GL's reads of the image before the
+  runtime's next blit into it. The GL->interop copy is skipped: the
+  runtime overwrites the image at Present and GLFW presents.
+The Linux rules live in InteropHandles; Windows behaviour is unchanged.
+
+stageLinuxRuntime stages the DLSS libraries only with -PlinuxDlss=true
+or -PlinuxDlssDir, and removes ones left from an earlier run, so the
+JAR no longer ships them by default.
+
+InteropHandlesTest covers the image-identity and wait decisions.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Tb41TgDi74v7sgH5LJBZ5A
+Signed-off-by: Claude (for Kush) <kushisthecoolest@gmail.com>
+---
+ build.gradle                                  |  26 ++--
+ .../rtxremix/minecraft/RemixRenderer.java     |   3 +
+ .../rtxremix/minecraft/gl/GlInterop.java      |  92 ++++++++++++--
+ .../rtxremix/minecraft/gl/InteropHandles.java | 120 ++++++++++++++----
+ .../minecraft/gl/InteropHandlesTest.java      |  64 ++++++++++
+ 5 files changed, 259 insertions(+), 46 deletions(-)
+ create mode 100644 src/test/java/com/nvidia/rtxremix/minecraft/gl/InteropHandlesTest.java
+
+diff --git a/build.gradle b/build.gradle
+index 63ab960..63bce80 100644
+--- a/build.gradle
++++ b/build.gradle
+@@ -327,13 +327,16 @@ fetchRuntimeSdkTasks['linux64'] = tasks.register('fetchRuntimeSdkLinux64') {
+     }
+ }
+ 
+-// Copies a locally built libremix.so and the DLSS feature libraries beside it
+-// into remix-runtime/linux64, and records where they came from. Explicit and
+-// user-invoked: it replaces the staged files every time it runs.
++// Copies a locally built libremix.so into remix-runtime/linux64, and records
++// where it came from. Explicit and user-invoked: it replaces the staged files
++// every time it runs. The DLSS feature libraries are staged only on request
++// (-PlinuxDlss=true or -PlinuxDlssDir=<dir>): NGX is off by default in the Linux
++// runtime (REMIX_LINUX_ENABLE_NGX=1 enables it), so they are not shipped otherwise.
+ def linuxRuntimeProperty = providers.gradleProperty('linuxRuntime')
+ def linuxDlssDirProperty = providers.gradleProperty('linuxDlssDir')
++def linuxDlssProperty = providers.gradleProperty('linuxDlss')
+ tasks.register('stageLinuxRuntime') {
+-    description = 'Stages a local Linux runtime: -PlinuxRuntime=<libremix.so or its dir> [-PlinuxDlssDir=<dir>]'
++    description = 'Stages a local Linux runtime: -PlinuxRuntime=<libremix.so or its dir> [-PlinuxDlss=true] [-PlinuxDlssDir=<dir>]'
+     group = 'build setup'
+     def targetDir = file('remix-runtime/linux64')
+     doLast {
+@@ -361,11 +364,16 @@ tasks.register('stageLinuxRuntime') {
+             logger.lifecycle("Staged ${source.name}")
+         }
+         copyIn(runtime)
+-        def dlssLibraries = dlssDir.directory
+-                ? (dlssDir.listFiles().findAll { it.file && it.name ==~ /libnvidia-ngx-.*\.so.*/ } ?: [])
+-                : []
+-        if (dlssLibraries.isEmpty()) {
+-            logger.warn("No DLSS libraries found in ${dlssDir}; DLSS stays unavailable. Pass -PlinuxDlssDir to stage them.")
++        def isDlss = { File f -> f.file && f.name ==~ /libnvidia-ngx-.*\.so.*/ }
++        // DLSS libraries from an earlier staging run would otherwise stay in the payload.
++        (targetDir.listFiles() ?: []).findAll(isDlss).each { stale ->
++            java.nio.file.Files.delete(stale.toPath())
++            logger.lifecycle("Removed previously staged ${stale.name}")
++        }
++        def wantDlss = linuxDlssDirProperty.isPresent() || linuxDlssProperty.map { it.toBoolean() }.getOrElse(false)
++        def dlssLibraries = wantDlss && dlssDir.directory ? (dlssDir.listFiles().findAll(isDlss) ?: []) : []
++        if (wantDlss && dlssLibraries.isEmpty()) {
++            logger.warn("No DLSS libraries found in ${dlssDir}; DLSS stays unavailable.")
+         }
+         dlssLibraries.each { copyIn(it) }
+         new File(targetDir, '.local-sdk-source').text =
+diff --git a/src/main/java/com/nvidia/rtxremix/minecraft/RemixRenderer.java b/src/main/java/com/nvidia/rtxremix/minecraft/RemixRenderer.java
+index b6738db..d5fcd59 100644
+--- a/src/main/java/com/nvidia/rtxremix/minecraft/RemixRenderer.java
++++ b/src/main/java/com/nvidia/rtxremix/minecraft/RemixRenderer.java
+@@ -1350,9 +1350,12 @@ public class RemixRenderer {
+             presentInfo.clientDoneSemaphore_ValueToWait =
+                     interopGlVk.getClientDoneSemaphoreValue();
+             presentInfo.disableCpuWaitForExternalSemaphores = 0;
++            // Linux: binary-semaphore and ordering rules of the FD interop (no-ops on Windows).
++            interopGlVk.beforeRemixPresent();
+             try (ProfileScope ignored = ProfileScope.begin("Remix.Present")) {
+                 remixApi.present(presentInfo);
+             }
++            interopGlVk.afterRemixPresent();
+             submitFrameCalled = false;
+         } catch (Exception e) {
+             failed = true;
+diff --git a/src/main/java/com/nvidia/rtxremix/minecraft/gl/GlInterop.java b/src/main/java/com/nvidia/rtxremix/minecraft/gl/GlInterop.java
+index 3bae619..0336061 100644
+--- a/src/main/java/com/nvidia/rtxremix/minecraft/gl/GlInterop.java
++++ b/src/main/java/com/nvidia/rtxremix/minecraft/gl/GlInterop.java
+@@ -33,6 +33,9 @@ public final class GlInterop {
+     private int vkDoneSemaphore;
+     private int clientDoneSemaphore;
+     private long clientDoneSemaphoreValue;
++    // Linux: the runtime signals the binary dxvkDone semaphore once per Present (once it has an interop image), and
++    // each signal must be waited exactly once. Set by afterRemixPresent, cleared by the wait that consumes it.
++    private boolean vkSignalPending;
+     private int[] barrierTextures = new int[0];
+     private int[] barrierLayouts = new int[0];
+ 
+@@ -41,13 +44,32 @@ public final class GlInterop {
+                 || !InteropHandles.present(interopInfo.clientDoneSemaphore_Handle)) {
+             throw new IllegalArgumentException("Remix interop semaphore handles must be nonzero");
+         }
+-        vkDoneSemaphore = importVulkanSemaphore(
+-                interopInfo.dxvkDoneSemaphore_Handle, "dxvkDoneSemaphore_Handle");
+-        clientDoneSemaphore = importVulkanSemaphore(
+-                interopInfo.clientDoneSemaphore_Handle, "clientDoneSemaphore_Handle");
++        try {
++            vkDoneSemaphore = importVulkanSemaphore(
++                    interopInfo.dxvkDoneSemaphore_Handle, "dxvkDoneSemaphore_Handle");
++            clientDoneSemaphore = importVulkanSemaphore(
++                    interopInfo.clientDoneSemaphore_Handle, "clientDoneSemaphore_Handle");
++        } finally {
++            // Linux: whatever this call handed out and was not imported is the caller's to close.
++            InteropHandles.releaseUnimported(interopInfo.clientDoneSemaphore_Handle, clientDoneSemaphore != 0);
++            InteropHandles.release(interopInfo.imageMemory_Handle);
++            InteropHandles.release(interopInfo.depthImageMemory_Handle);
++        }
+     }
+ 
+     private int importVulkanSemaphore(long handle, String debugName) {
++        if (!InteropHandles.USES_TIMELINE_SEMAPHORES) {
++            // Linux: the runtime's interop semaphores are binary, so a plain EXT_semaphore object imports them.
++            int semaphore = glGenSemaphoresEXT();
++            checkGlError("glGenSemaphoresEXT " + debugName);
++            if (semaphore == 0) {
++                InteropHandles.release(handle);
++                throw new IllegalStateException("Failed to create GL semaphore for " + debugName);
++            }
++            InteropHandles.importSemaphore(semaphore, handle);
++            checkGlError("glImportSemaphore " + debugName);
++            return semaphore;
++        }
+         int semaphore = RemixBridge.openglCreateSemaphoresNV();
+         checkGlError("glCreateSemaphoresNV " + debugName);
+         if (semaphore == 0) {
+@@ -67,6 +89,9 @@ public final class GlInterop {
+     }
+ 
+     public boolean recreateImagesIf(InteropInfo info) {
++        // Linux: every call returns fresh semaphore descriptors too; the semaphores were imported once, at construction.
++        InteropHandles.release(info.dxvkDoneSemaphore_Handle);
++        InteropHandles.release(info.clientDoneSemaphore_Handle);
+         boolean recreated = colorImage.recreate(
+                 info.imageMemory_Handle,
+                 info.allocationSize,
+@@ -91,6 +116,10 @@ public final class GlInterop {
+ 
+     public void waitForVk(InteropInfo info) {
+         drainStaleGlErrors();
++        if (!InteropHandles.USES_TIMELINE_SEMAPHORES) {
++            consumeVkSignal();
++            return;
++        }
+         int result = RemixBridge.openglSemaphoreParameterui64vEXT(
+                 vkDoneSemaphore,
+                 RemixBridge.GL_TIMELINE_SEMAPHORE_VALUE_NV,
+@@ -106,6 +135,12 @@ public final class GlInterop {
+ 
+     public void signalDone() {
+         clientDoneSemaphoreValue++;
++        if (!InteropHandles.USES_TIMELINE_SEMAPHORES) {
++            // Linux: the runtime never waits on clientDone, and signalling a binary semaphore nobody waits on is
++            // invalid after the first time, so it is left alone. beforeRemixPresent orders GL before the runtime.
++            glFlush();
++            return;
++        }
+         int result = RemixBridge.openglSemaphoreParameterui64vEXT(
+                 clientDoneSemaphore,
+                 RemixBridge.GL_TIMELINE_SEMAPHORE_VALUE_NV,
+@@ -120,11 +155,47 @@ public final class GlInterop {
+         glFlush();
+     }
+ 
++    /**
++     * Linux, before Remix Present: consumes a dxvkDone signal no frame waited on, so the runtime never signals a
++     * signalled binary semaphore, then finishes GL work. The runtime does not wait on clientDone before it writes the
++     * interop image, so GL must be done sampling the previous frame from it first.
++     */
++    public void beforeRemixPresent() {
++        if (InteropHandles.USES_TIMELINE_SEMAPHORES) {
++            return;
++        }
++        drainStaleGlErrors();
++        consumeVkSignal();
++        glFinish();
++    }
++
++    /** Linux, after Remix Present: the runtime has signalled dxvkDone if it has an interop image. */
++    public void afterRemixPresent() {
++        if (!InteropHandles.USES_TIMELINE_SEMAPHORES) {
++            vkSignalPending = true;
++        }
++    }
++
++    private void consumeVkSignal() {
++        // Waiting before the first Present, or before an image was imported, would wait on a signal that never comes.
++        if (!InteropHandles.shouldWaitForVk(vkSignalPending, colorImage.available())) {
++            return;
++        }
++        glWaitSemaphoreEXT(vkDoneSemaphore, NO_BUFFERS, barrierTextures, barrierLayouts);
++        checkGlError("glWaitSemaphoreEXT");
++        vkSignalPending = false;
++    }
++
+     public void copyFromFramebuffer(int sourceFbo) {
+         drainStaleGlErrors();
+         if (!colorImage.available()) {
+             return;
+         }
++        if (!InteropHandles.USES_TIMELINE_SEMAPHORES) {
++            // Linux: the runtime blits its own output into the interop image at Present and GL presents through
++            // GLFW, so a GL copy into it would only race that blit.
++            return;
++        }
+         int destinationFbo = colorImage.framebuffer();
+         glBlitNamedFramebuffer(
+                 sourceFbo,
+@@ -227,6 +298,7 @@ public final class GlInterop {
+     private final class InteropImage {
+         private final boolean color;
+         private long memoryHandle;
++        private long allocationSize;
+         private int memoryObject;
+         private int texture;
+         private int width;
+@@ -253,19 +325,19 @@ public final class GlInterop {
+                 }
+                 return false;
+             }
+-            if (available()
+-                    && memoryHandle == newMemoryHandle
+-                    && width == newWidth
+-                    && height == newHeight
+-                    && this.internalFormat == internalFormat) {
++            if (InteropHandles.sameImage(available(), memoryHandle, width, height, this.internalFormat, this.allocationSize,
++                    newMemoryHandle, newWidth, newHeight, internalFormat, allocationSize)) {
++                InteropHandles.release(newMemoryHandle);
+                 return false;
+             }
+             if (allocationSize <= 0 || newWidth <= 0 || newHeight <= 0 || internalFormat == 0) {
++                InteropHandles.release(newMemoryHandle);
+                 throw new IllegalArgumentException("Invalid Remix " + debugName + " interop image");
+             }
+             destroy();
+ 
+             memoryHandle = newMemoryHandle;
++            this.allocationSize = allocationSize;
+             width = newWidth;
+             height = newHeight;
+             this.internalFormat = internalFormat;
+@@ -276,6 +348,7 @@ public final class GlInterop {
+                 checkGlError("glImportMemory(" + debugName + ")");
+ 
+                 texture = glCreateTextures(GL_TEXTURE_2D);
++                InteropHandles.prepareTextureForImport(texture);
+                 glTextureStorageMem2DEXT(
+                         texture, 1, internalFormat, width, height, memoryObject, 0);
+                 glTextureParameteri(texture, GL_TEXTURE_MIN_FILTER, filter);
+@@ -327,6 +400,7 @@ public final class GlInterop {
+                 memoryObject = 0;
+             }
+             memoryHandle = 0;
++            allocationSize = 0;
+             width = 0;
+             height = 0;
+             internalFormat = 0;
+diff --git a/src/main/java/com/nvidia/rtxremix/minecraft/gl/InteropHandles.java b/src/main/java/com/nvidia/rtxremix/minecraft/gl/InteropHandles.java
+index 6b68426..cdc1856 100644
+--- a/src/main/java/com/nvidia/rtxremix/minecraft/gl/InteropHandles.java
++++ b/src/main/java/com/nvidia/rtxremix/minecraft/gl/InteropHandles.java
+@@ -9,34 +9,42 @@ import org.lwjgl.opengl.GL11;
+ import org.lwjgl.opengl.GLCapabilities;
+ import org.lwjgl.system.Platform;
+ 
++import static org.lwjgl.opengl.EXTMemoryObject.GL_OPTIMAL_TILING_EXT;
++import static org.lwjgl.opengl.EXTMemoryObject.GL_TEXTURE_TILING_EXT;
+ import static org.lwjgl.opengl.EXTMemoryObjectFD.GL_HANDLE_TYPE_OPAQUE_FD_EXT;
+ import static org.lwjgl.opengl.EXTMemoryObjectFD.glImportMemoryFdEXT;
+ import static org.lwjgl.opengl.EXTMemoryObjectWin32.GL_HANDLE_TYPE_OPAQUE_WIN32_EXT;
+ import static org.lwjgl.opengl.EXTMemoryObjectWin32.glImportMemoryWin32HandleEXT;
+ import static org.lwjgl.opengl.EXTSemaphoreFD.glImportSemaphoreFdEXT;
+ import static org.lwjgl.opengl.EXTSemaphoreWin32.glImportSemaphoreWin32HandleEXT;
++import static org.lwjgl.opengl.GL45.glTextureParameteri;
+ 
+ /**
+- * How Remix interop handles reach OpenGL on each platform. Everything else in
+- * {@link GlInterop} is platform-neutral.
++ * How Remix interop handles reach OpenGL on each platform, and the rules for
++ * owning them. GlInterop asks this class instead of branching on the platform.
+  *
+- * <p>Windows: the {@code InteropInfo} handle fields carry Win32 handles,
+- * imported with {@code EXT_memory_object_win32} and {@code EXT_semaphore_win32}.
+- * This is unchanged.
++ * <p>Windows (unchanged): the {@code InteropInfo} handle fields carry Win32
++ * handles, imported with {@code EXT_*_win32}; the semaphores are NV timeline
++ * semaphores driven by wait/signal values; an image is identified by its handle.
+  *
+- * <p>Linux: the handle fields are assumed to carry opaque POSIX file descriptors
+- * ({@code VK_EXTERNAL_*_HANDLE_TYPE_OPAQUE_FD_BIT}), imported with
+- * {@code EXT_memory_object_fd} and {@code EXT_semaphore_fd}. A successful GL
+- * import takes ownership of the descriptor it is given. The runtime is assumed
+- * to keep owning the descriptors it reports, and to report the same descriptor
+- * while an allocation is unchanged. GlInterop's change detection compares handle
+- * values, so this class imports a {@code dup()} and the runtime's descriptor
+- * stays valid. If the interop work settles on the runtime handing the client a
+- * fresh descriptor on every call instead, import the descriptor itself in
+- * {@link #importFd} and stop comparing handle values in GlInterop.
++ * <p>Linux, following the runtime's contract (PORTING_NOTES, Phase D step 5):
++ * <ul>
++ *   <li>Every non-zero handle field of every {@code dxvk_GetInteropInfo} call is
++ *       a fresh opaque file descriptor that the caller owns. Each one is either
++ *       imported, which hands it to GL, or closed with {@link #release}.</li>
++ *   <li>Descriptor numbers say nothing about identity, so an image is the same
++ *       image while its size, format and allocation size are unchanged.</li>
++ *   <li>The semaphores are binary: no NV timeline objects or values. The runtime
++ *       signals dxvkDone once per Present and never waits on clientDone.</li>
++ *   <li>The image is {@code VK_IMAGE_TILING_OPTIMAL}, so the GL texture needs
++ *       {@code GL_TEXTURE_TILING_EXT = GL_OPTIMAL_TILING_EXT} before its storage
++ *       is bound to the memory.</li>
++ * </ul>
+  */
+ public final class InteropHandles {
+     static final boolean POSIX_FD = Platform.get() != Platform.WINDOWS;
++    /** Windows drives NV timeline semaphores with values; Linux uses plain binary semaphores. */
++    static final boolean USES_TIMELINE_SEMAPHORES = !POSIX_FD;
+ 
+     private InteropHandles() {}
+ 
+@@ -60,41 +68,97 @@ public final class InteropHandles {
+         return handle != 0 && handle != -1L;
+     }
+ 
++    /** Imports a semaphore handle. On Linux GL owns the descriptor afterwards; a failed import closes it. */
+     static void importSemaphore(int semaphore, long handle) {
+         if (POSIX_FD) {
+-            importFd(handle, fd -> glImportSemaphoreFdEXT(semaphore, GL_HANDLE_TYPE_OPAQUE_FD_EXT, fd));
++            int fd = toFd(handle);
++            glImportSemaphoreFdEXT(semaphore, GL_HANDLE_TYPE_OPAQUE_FD_EXT, fd);
++            closeOnGlError(fd, "semaphore");
+         } else {
+             glImportSemaphoreWin32HandleEXT(semaphore, GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, handle);
+         }
+     }
+ 
++    /** Imports an image memory handle. On Linux GL owns the descriptor afterwards; a failed import closes it. */
+     static void importMemory(int memoryObject, long allocationSize, long handle) {
+         if (POSIX_FD) {
+-            importFd(handle, fd -> glImportMemoryFdEXT(memoryObject, allocationSize, GL_HANDLE_TYPE_OPAQUE_FD_EXT, fd));
++            int fd = toFd(handle);
++            glImportMemoryFdEXT(memoryObject, allocationSize, GL_HANDLE_TYPE_OPAQUE_FD_EXT, fd);
++            closeOnGlError(fd, "image memory");
+         } else {
+             glImportMemoryWin32HandleEXT(memoryObject, allocationSize, GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, handle);
+         }
+     }
+ 
++    /** Sets what the texture needs before glTextureStorageMem2DEXT binds it to imported memory. */
++    static void prepareTextureForImport(int texture) {
++        if (POSIX_FD) {
++            glTextureParameteri(texture, GL_TEXTURE_TILING_EXT, GL_OPTIMAL_TILING_EXT);
++        }
++    }
++
++    /** Closes a handle this process received and does not import. No-op on Windows and for "no handle". */
++    static void release(long handle) {
++        if (POSIX_FD && present(handle) && handle > 0 && handle <= Integer.MAX_VALUE) {
++            RemixBridge.posixCloseFd((int) handle);
++        }
++    }
++
++    /** {@link #release} unless the handle was imported. */
++    static void releaseUnimported(long handle, boolean imported) {
++        if (!imported) {
++            release(handle);
++        }
++    }
++
+     /**
+-     * Imports a duplicate of {@code handle}. GL owns the duplicate after a
+-     * successful import; after a failed one ownership stays here, so it is closed.
+-     * The caller has drained stale GL errors, as GlInterop does before every import.
++     * Whether a newly reported image is the one already imported. Windows
++     * compares handles; on Linux every call reports a new descriptor for the
++     * same image, so only size, format and allocation size count.
+      */
+-    private static void importFd(long handle, java.util.function.IntConsumer glImport) {
+-        if (handle < 0 || handle > Integer.MAX_VALUE) {
+-            throw new IllegalArgumentException("Interop handle is not a file descriptor: " + handle);
++    static boolean sameImage(boolean available, long currentHandle, int currentWidth, int currentHeight,
++                             int currentFormat, long currentAllocationSize,
++                             long newHandle, int newWidth, int newHeight, int newFormat, long newAllocationSize) {
++        return sameImage(POSIX_FD, available, currentHandle, currentWidth, currentHeight, currentFormat,
++                currentAllocationSize, newHandle, newWidth, newHeight, newFormat, newAllocationSize);
++    }
++
++    static boolean sameImage(boolean posixFd, boolean available, long currentHandle, int currentWidth,
++                             int currentHeight, int currentFormat, long currentAllocationSize,
++                             long newHandle, int newWidth, int newHeight, int newFormat, long newAllocationSize) {
++        if (!available) {
++            return false;
+         }
+-        int fd = RemixBridge.posixDupFd((int) handle);
+-        if (fd < 0) {
+-            throw new IllegalStateException("dup() of interop descriptor " + handle + " failed");
++        boolean sameShape = currentWidth == newWidth && currentHeight == newHeight && currentFormat == newFormat;
++        if (posixFd) {
++            return sameShape && currentAllocationSize == newAllocationSize;
+         }
+-        glImport.accept(fd);
++        return sameShape && currentHandle == newHandle;
++    }
++
++    /**
++     * Linux: whether GL should wait on dxvkDone now. Only a Present that ran
++     * after an image existed has signalled it, and each signal is waited once.
++     */
++    static boolean shouldWaitForVk(boolean signalPending, boolean imageAvailable) {
++        return signalPending && imageAvailable;
++    }
++
++    private static int toFd(long handle) {
++        if (handle <= 0 || handle > Integer.MAX_VALUE) {
++            throw new IllegalArgumentException("Interop handle is not a file descriptor: " + handle);
++        }
++        return (int) handle;
++    }
++
++    // The caller has drained stale GL errors, as GlInterop does before every import.
++    private static void closeOnGlError(int fd, String what) {
+         int error = GL11.glGetError();
+         if (error != GL11.GL_NO_ERROR) {
++            // Ownership only passes to GL on success.
+             RemixBridge.posixCloseFd(fd);
+             throw new IllegalStateException(
+-                    "OpenGL error importing interop descriptor: 0x" + Integer.toHexString(error));
++                    "OpenGL error importing interop " + what + " descriptor: 0x" + Integer.toHexString(error));
+         }
+     }
+ }
+diff --git a/src/test/java/com/nvidia/rtxremix/minecraft/gl/InteropHandlesTest.java b/src/test/java/com/nvidia/rtxremix/minecraft/gl/InteropHandlesTest.java
+new file mode 100644
+index 0000000..834a2ea
+--- /dev/null
++++ b/src/test/java/com/nvidia/rtxremix/minecraft/gl/InteropHandlesTest.java
+@@ -0,0 +1,64 @@
++/*
++ * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++ * SPDX-License-Identifier: Apache-2.0
++ */
++package com.nvidia.rtxremix.minecraft.gl;
++
++import org.junit.jupiter.api.Test;
++
++import static org.junit.jupiter.api.Assertions.assertFalse;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++
++class InteropHandlesTest {
++    private static final int RGBA8 = 0x8058;
++    private static final int SRGB8_ALPHA8 = 0x8C43;
++
++    @Test
++    void linuxKeepsAnImageWhoseDescriptorChangedButNotItsShape() {
++        // Every GetInteropInfo call hands out a new descriptor for the same image.
++        assertTrue(InteropHandles.sameImage(true, true, 41, 854, 480, RGBA8, 1_769_472,
++                57, 854, 480, RGBA8, 1_769_472));
++    }
++
++    @Test
++    void linuxReimportsWhenSizeFormatOrAllocationChanges() {
++        assertFalse(InteropHandles.sameImage(true, true, 41, 854, 480, RGBA8, 1_769_472,
++                57, 1920, 1080, RGBA8, 8_294_400));
++        assertFalse(InteropHandles.sameImage(true, true, 41, 854, 480, RGBA8, 1_769_472,
++                57, 854, 480, SRGB8_ALPHA8, 1_769_472));
++        assertFalse(InteropHandles.sameImage(true, true, 41, 854, 480, RGBA8, 1_769_472,
++                57, 854, 480, RGBA8, 2_000_000));
++    }
++
++    @Test
++    void windowsStillIdentifiesAnImageByItsHandle() {
++        assertTrue(InteropHandles.sameImage(false, true, 0x10b, 854, 480, RGBA8, 1_769_472,
++                0x10b, 854, 480, RGBA8, 1_769_472));
++        assertFalse(InteropHandles.sameImage(false, true, 0x10b, 854, 480, RGBA8, 1_769_472,
++                0x10c, 854, 480, RGBA8, 1_769_472));
++    }
++
++    @Test
++    void nothingIsTheSameImageBeforeAnImageWasImported() {
++        assertFalse(InteropHandles.sameImage(true, false, 0, 0, 0, 0, 0,
++                57, 854, 480, RGBA8, 1_769_472));
++        assertFalse(InteropHandles.sameImage(false, false, 0, 0, 0, 0, 0,
++                0x10b, 854, 480, RGBA8, 1_769_472));
++    }
++
++    @Test
++    void waitsOnlyForASignalThatAPresentWithAnImageProduced() {
++        // Before the first Present, or before an image was imported, no signal is coming.
++        assertFalse(InteropHandles.shouldWaitForVk(false, false));
++        assertFalse(InteropHandles.shouldWaitForVk(false, true));
++        assertFalse(InteropHandles.shouldWaitForVk(true, false));
++        assertTrue(InteropHandles.shouldWaitForVk(true, true));
++    }
++
++    @Test
++    void noHandleMeansZeroOrMinusOne() {
++        assertFalse(InteropHandles.present(0));
++        assertFalse(InteropHandles.present(-1));
++        assertTrue(InteropHandles.present(0x10b));
++    }
++}
+-- 
+2.43.0
+

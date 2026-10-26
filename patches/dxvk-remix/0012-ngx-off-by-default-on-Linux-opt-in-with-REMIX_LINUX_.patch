@@ -1,0 +1,42 @@
+From d7814b859066ca96113bbb4c53ab49dd4a21d31f Mon Sep 17 00:00:00 2001
+From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
+Date: Mon, 26 Oct 2026 23:19:17 +0000
+Subject: [PATCH] ngx: off by default on Linux, opt in with
+ REMIX_LINUX_ENABLE_NGX=1
+
+With the DLSS feature libraries present, NVSDK_NGX_VULKAN_Init_Ext2
+still faults in the driver's libnvidia-ngx.so.1 (+0xc3505, six frames
+deep) on an RTX 5070 after the previous change, so the cause is not
+established. NGX now stays off on Linux unless REMIX_LINUX_ENABLE_NGX=1
+is set; DLSS, DLSS-RR and DLFG then report unsupported. This replaces
+REMIX_LINUX_DISABLE_NGX. Windows is unchanged.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Tb41TgDi74v7sgH5LJBZ5A
+Signed-off-by: Claude (for Kush) <kushisthecoolest@gmail.com>
+---
+ src/dxvk/rtx_render/rtx_ngx_wrapper.cpp | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/src/dxvk/rtx_render/rtx_ngx_wrapper.cpp b/src/dxvk/rtx_render/rtx_ngx_wrapper.cpp
+index d69f4df..d6e1472 100644
+--- a/src/dxvk/rtx_render/rtx_ngx_wrapper.cpp
++++ b/src/dxvk/rtx_render/rtx_ngx_wrapper.cpp
+@@ -169,9 +169,11 @@ namespace dxvk
+     m_dlssNeuralRenderingSupportChecked = false;
+ 
+ #ifndef _WIN32
+-    // Escape hatch for driver/NGX combinations that still fail: skips NGX, so DLSS, DLSS-RR and DLFG report unsupported.
+-    if (env::getEnvVar("REMIX_LINUX_DISABLE_NGX") == "1") {
+-      Logger::info("NGX disabled by REMIX_LINUX_DISABLE_NGX=1");
++    // NGX is off by default on Linux: with the DLSS feature libraries present, NVSDK_NGX_VULKAN_Init faulted inside the
++    // driver's libnvidia-ngx.so.1 on an RTX 5070 (PORTING_NOTES, Phase D step 6/7). Opt in with REMIX_LINUX_ENABLE_NGX=1.
++    // Off, DLSS, DLSS-RR and DLFG report unsupported and the runtime uses its other upscalers and denoisers.
++    if (env::getEnvVar("REMIX_LINUX_ENABLE_NGX") != "1") {
++      ONCE(Logger::info("NGX (DLSS) is off on Linux; set REMIX_LINUX_ENABLE_NGX=1 to try it"));
+       s_dlssNeuralRenderingStatus.store(0, std::memory_order_release);
+       return false;
+     }
+-- 
+2.43.0
+

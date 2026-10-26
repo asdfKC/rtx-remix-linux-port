@@ -836,3 +836,57 @@ imports a `dup()`. Step 5 defines the opposite contract: every `GetInteropInfo` 
 FDs, and the semaphores are binary. As written, the mod would therefore leak an FD per call and re-import the image
 every frame. `GlInterop` also sets NV timeline values, and it does not set `GL_TEXTURE_TILING_EXT =
 GL_OPTIMAL_TILING_EXT`, which step 5 found the import needs. To be fixed in the mod next.
+
+## Phase D step 7: NGX off by default; mod interop on the runtime's FD contract (2026-10-26)
+
+**Status:** compiles and links. The mod's interop logic passes its unit test and an FD-accounting simulation in the
+container (stubbed GL, real bridge). **Nothing here has run on the GPU.**
+
+### 1. NGX (runtime patch 0012, Gradle in mod patch 0004, `install.sh --dlss`)
+- **Patch 0011 did not fix the fault.** Your coredump puts the top frame at `libnvidia-ngx.so.1+0xc3505`, six frames
+  inside `Init_Ext2`, not at `0x0`. So the RTLD_LOCAL explanation is **unconfirmed**, and the cause is unknown.
+- **NGX is now off by default on Linux.** `REMIX_LINUX_ENABLE_NGX=1` opts in; this replaces
+  `REMIX_LINUX_DISABLE_NGX`. 0011's entry points and data path stay in, for whoever opts in.
+- **The DLSS libraries are no longer shipped by default.** `stageLinuxRuntime` stages them only with
+  `-PlinuxDlss=true` or `-PlinuxDlssDir`, and removes ones left from an earlier staging run.
+  `install.sh --dlss` does both: it stages them and adds `REMIX_LINUX_ENABLE_NGX=1` to the Prism wrapper command.
+- **Checked on lavapipe** with the DLSS libraries present: off by default (one log line, no NGX init, Startup/Present
+  0x0). With opt-in, NGX init runs and reports unsupported, as before.
+
+### 2. Mod interop (mod patch 0004)
+**The in-game failure** ("Failed to create GL semaphore for dxvkDoneSemaphore_Handle") came from the Windows path:
+`glCreateSemaphoresNV` (NV timeline semaphores) returned 0. The handles themselves (`0x10b`, `0x10c`) were fine.
+
+**Changes, all Linux only and decided in `InteropHandles` (Windows unchanged):**
+- **Semaphores:** binary, as plain `glGenSemaphoresEXT` objects, imported once at init. GL takes the descriptor;
+  there is no dup any more. No NV timeline values are set.
+- **Ownership:** every descriptor of every later `GetInteropInfo` call is either imported or closed. That includes
+  the semaphore descriptors every call returns, and the image descriptor whenever the image is unchanged.
+- **Image identity:** size, format and allocation size, never the descriptor number. Before the memory import,
+  `GL_TEXTURE_TILING_EXT = GL_OPTIMAL_TILING_EXT` is set on the texture.
+- **Waits:** `dxvkDone` is waited once per Remix Present, and only after an image was imported. A signal that no
+  frame waited on is consumed before the next Present, so the runtime never signals a signalled binary semaphore.
+- **Signals:** `clientDone` is never signalled, because the runtime never waits on it. `glFinish` runs before each
+  Present, so GL's reads of the image finish before the runtime blits into it again.
+- **No GL→interop copy:** the runtime overwrites the image at Present, and GLFW presents the GL frame.
+
+**Timing: fixed in the mod, the less invasive option.** No runtime change:
+- The image is not allocated at Startup. The mod already calls `GetInteropInfo` every frame and imports the image
+  lazily, so the image arrives on the first call after the first Present.
+- What was missing is that GL must not wait before that. That rule is in `shouldWaitForVk`.
+- Allocating at Startup would need a runtime change, plus an agreed size before the first frame. It would only move
+  the first image one frame earlier.
+
+### Checks in the container
+- `InteropHandlesTest` (6 tests: image identity on both platforms, the wait rule, "no handle") passes. It runs
+  through a minimal reflection runner, since JUnit could not be fetched; the file itself is a normal JUnit 5 test for
+  the real build.
+- **FD accounting** (`tests/java/FdProtocolSmoke.java`): this drives the real `GlInterop` against GL stubs, where
+  an import closes the FD to mimic GL taking ownership. The "runtime" hands out fresh real descriptors (`dup(0)`),
+  with no image before the first Present, then 50 frames with a resize at frame 25.
+  - Result: **no descriptor leaked**.
+  - 4 imports: 2 semaphores, plus one image per size.
+  - **49 waits for 50 Presents**: none before the first Present, one per signal after it, and the last one pending.
+- `GlInterop`, `InteropHandles` and `LinuxPresent` compile against the API stubs. `RemixRenderer` (3 added lines)
+  could not be compiled here.
+- Both patch series apply cleanly from their pins (runtime 12, mod 4) and match the trees I built.
