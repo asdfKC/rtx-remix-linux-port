@@ -1,0 +1,992 @@
+From b29a49d27fb6745e312d364776d1112db51d3b5f Mon Sep 17 00:00:00 2001
+From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
+Date: Mon, 26 Oct 2026 13:18:20 +0000
+Subject: [PATCH] remixbridge: POSIX port (libremixbridge.so)
+
+All Windows code stays as it was, behind #ifdef _WIN32. On other
+platforms:
+
+- The runtime is loaded with dlopen(RTLD_NOW | RTLD_LOCAL) and dlsym.
+  Paths from Java go through UTF-16, not modified UTF-8. remixapi_Path
+  is wchar_t (UTF-32) for CreateTextureFromFile.
+- A fatal-signal handler (SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT)
+  replaces the unhandled-exception filter and minidump. It writes
+  crash/crash_report_<time>.txt (signal, fault address, module,
+  registers, faulting-thread backtrace, /proc/self/maps) and chains to
+  the previous handler, normally the JVM's. Faults in JIT code or
+  libjvm (implicit null checks, safepoints) are passed straight on.
+- No Toolhelp: other threads are not walked. The JVM's hs_err log
+  lists them.
+- Tracy symbols are looked up with dlsym in the loaded runtime.
+- The command line is presented from the kernel's argument area
+  (/proc/self/stat arg_start/arg_end) with CommandLineToArgvW quoting.
+  Redaction blanks the source bytes, so /proc/<pid>/cmdline no longer
+  shows the values.
+- Present always passes PresentInfo: there is no window handle, and the
+  headless runtime needs skipVulkanSwapchain and the interop fields.
+- GL semaphore entry points are resolved through glXGetProcAddressARB,
+  then eglGetProcAddress, from the libraries LWJGL already loaded.
+- D3D9 helpers use DXVK native's type widths. Release is called
+  through vtable slot 2.
+
+remix_c.h takes the runtime's POSIX header block, which changes nothing
+on Windows. CMakeLists.txt builds build/native/linux64/libremixbridge.so;
+build_native.bat is unchanged.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Tb41TgDi74v7sgH5LJBZ5A
+Signed-off-by: Claude (for Kush) <kushisthecoolest@gmail.com>
+---
+ rtxremix-java/native/CMakeLists.txt    |  44 ++
+ rtxremix-java/native/include/remix_c.h |  23 +-
+ rtxremix-java/native/remixbridge.cpp   | 646 ++++++++++++++++++++++++-
+ 3 files changed, 692 insertions(+), 21 deletions(-)
+ create mode 100644 rtxremix-java/native/CMakeLists.txt
+
+diff --git a/rtxremix-java/native/CMakeLists.txt b/rtxremix-java/native/CMakeLists.txt
+new file mode 100644
+index 0000000..d12140b
+--- /dev/null
++++ b/rtxremix-java/native/CMakeLists.txt
+@@ -0,0 +1,44 @@
++# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++# SPDX-License-Identifier: Apache-2.0
++#
++# Builds the JNI bridge: libremixbridge.so on Linux. Windows keeps build_native.bat.
++#
++#   cmake -S rtxremix-java/native -B build/native-cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo
++#   cmake --build build/native-cmake
++#
++# Output: build/native/linux64/libremixbridge.so under the repository root, matching
++# build_native.bat's build/native/<arch>/ layout.
++cmake_minimum_required(VERSION 3.16)
++project(remixbridge LANGUAGES CXX)
++
++set(CMAKE_CXX_STANDARD 17)
++set(CMAKE_CXX_STANDARD_REQUIRED ON)
++
++# JNI headers: JAVA_HOME first (the JDK Gradle runs with), else CMake's search.
++if(DEFINED ENV{JAVA_HOME} AND EXISTS "$ENV{JAVA_HOME}/include/jni.h")
++  set(JNI_HEADERS "$ENV{JAVA_HOME}/include" "$ENV{JAVA_HOME}/include/linux")
++else()
++  find_package(JNI REQUIRED)
++  set(JNI_HEADERS ${JNI_INCLUDE_DIRS})
++endif()
++
++# Remix C header (override with -DREMIX_INCLUDE=...)
++set(REMIX_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/include" CACHE PATH "Directory containing remix_c.h")
++if(NOT EXISTS "${REMIX_INCLUDE}/remix_c.h")
++  message(FATAL_ERROR "remix_c.h not found in ${REMIX_INCLUDE}")
++endif()
++
++if(NOT DEFINED REMIXBRIDGE_OUTPUT_DIR)
++  set(REMIXBRIDGE_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../build/native/linux64")
++endif()
++
++add_library(remixbridge SHARED remixbridge.cpp)
++target_include_directories(remixbridge PRIVATE ${JNI_HEADERS} "${REMIX_INCLUDE}")
++target_compile_options(remixbridge PRIVATE -Wall -Wno-unused-parameter)
++set_target_properties(remixbridge PROPERTIES
++  CXX_VISIBILITY_PRESET hidden
++  VISIBILITY_INLINES_HIDDEN ON
++  LIBRARY_OUTPUT_DIRECTORY "${REMIXBRIDGE_OUTPUT_DIR}")
++# Every symbol must resolve at link time: the bridge only needs libc and libdl.
++target_link_libraries(remixbridge PRIVATE ${CMAKE_DL_LIBS})
++target_link_options(remixbridge PRIVATE -Wl,--no-undefined -Wl,--as-needed)
+diff --git a/rtxremix-java/native/include/remix_c.h b/rtxremix-java/native/include/remix_c.h
+index b98be68..e854b68 100644
+--- a/rtxremix-java/native/include/remix_c.h
++++ b/rtxremix-java/native/include/remix_c.h
+@@ -25,13 +25,32 @@
+ 
+ #include <stdint.h>
+ 
++// Non-Windows builds (native Linux): no Windows headers, no Win32 library loader,
++// default-visibility exports and the platform calling convention.
++#if !defined(_WIN32)
++  #define REMIX_NATIVE_POSIX 1
++  #include <stddef.h> // wchar_t in C
++  #ifndef REMIX_WINAPI_NO_INCLUDE
++    #define REMIX_WINAPI_NO_INCLUDE
++  #endif
++  #ifndef REMIX_WINAPI_NO_LIBRARY_LOADER
++    #define REMIX_WINAPI_NO_LIBRARY_LOADER
++  #endif
++  #ifndef REMIXAPI_CALL
++    #define REMIXAPI_CALL
++  #endif
++  #ifndef REMIXAPI
++    #define REMIXAPI __attribute__((visibility("default")))
++  #endif
++#endif
++
+ #ifndef REMIX_WINAPI_NO_INCLUDE
+ #include <windows.h>
+ #endif
+ 
+ 
+ #ifndef REMIX_ALLOW_X86
+-#if _WIN64 != 1
++#if (defined(_WIN32) && _WIN64 != 1) || (!defined(_WIN32) && !defined(__LP64__))
+   #error Remix API requires 64-bit for the ray tracing features.
+ #endif
+ #endif
+@@ -88,7 +107,7 @@ typedef struct IDirect3DSurface9  IDirect3DSurface9;
+ #else // if there's no 'Windows.h', then declare WINAPI types/functions manually
+   typedef struct HWND__* remixapi_HWND;
+   typedef struct HINSTANCE__* remixapi_HMODULE;
+-  typedef long long(__stdcall* remixapi_loader_PROC)();
++  typedef long long(REMIXAPI_CALL* remixapi_loader_PROC)();
+   #define REMIX_WINAPI_LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR 0x00000100
+   #define REMIX_WINAPI_LOAD_LIBRARY_SEARCH_DEFAULT_DIRS 0x00001000
+   #define REMIX_WINAPI_MAX_PATH                         260
+diff --git a/rtxremix-java/native/remixbridge.cpp b/rtxremix-java/native/remixbridge.cpp
+index b76ad7f..c8b164b 100644
+--- a/rtxremix-java/native/remixbridge.cpp
++++ b/rtxremix-java/native/remixbridge.cpp
+@@ -4,13 +4,15 @@
+  */
+ 
+ /*
+- * RTX Remix JNI Bridge: remixbridge.dll
++ * RTX Remix JNI Bridge: remixbridge.dll (Windows), libremixbridge.so (Linux)
+  *
+- * Single-file JNI shim: loads d3d9.dll, calls remixapi_InitializeLibrary to
+- * obtain the remixapi_Interface vtable, and exposes every Remix API method as
+- * a JNI native function consumed by com.nvidia.rtxremix.RemixBridge.
++ * Single-file JNI shim: loads d3d9.dll (libremix.so on Linux), calls
++ * remixapi_InitializeLibrary to obtain the remixapi_Interface vtable, and
++ * exposes every Remix API method as a JNI native function consumed by
++ * com.nvidia.rtxremix.RemixBridge.
+  */
+ 
++#ifdef _WIN32
+ #define WIN32_LEAN_AND_MEAN
+ #include <windows.h>
+ #include <winternl.h>
+@@ -18,6 +20,17 @@
+ #include <dbghelp.h>
+ #include <tlhelp32.h>
+ #include <malloc.h>
++#else
++#include <dlfcn.h>
++#include <execinfo.h>
++#include <fcntl.h>
++#include <signal.h>
++#include <sys/stat.h>
++#include <sys/syscall.h>
++#include <ucontext.h>
++#include <unistd.h>
++#include <atomic>
++#endif
+ #include <jni.h>
+ #include <cstring>
+ #include <cstdint>
+@@ -28,13 +41,39 @@
+ #include <string>
+ #include <vector>
+ 
++#ifdef _WIN32
+ // HACKHACK: link to OpenGL to expose 'glSemaphoreParameterui64vEXT',
+ //           reason: LWJGL does not expose that function
+ #include <gl/GL.h>
+ #pragma comment(lib, "opengl32.lib")
++#else
++// The GL semaphore entry points at the end of this file are resolved through
++// the GL context's loader, so no GL library is linked. Only the types are needed.
++typedef unsigned int GLenum;
++typedef unsigned int GLuint;
++typedef int GLint;
++typedef int GLsizei;
++#endif
+ 
+ #include "remix_c.h"
+ 
++#ifdef _WIN32
++#define REMIXBRIDGE_EXPORT __declspec(dllexport)
++#else
++#define REMIXBRIDGE_EXPORT __attribute__((visibility("default")))
++
++// Win32 types used by the D3D9 COM helpers, with DXVK native's definitions.
++typedef uint32_t UINT;
++typedef uint32_t DWORD;
++typedef int32_t BOOL;
++typedef int32_t HRESULT;
++typedef remixapi_HWND HWND;
++#define TRUE 1
++#define FALSE 0
++#define SUCCEEDED(hr) (((HRESULT)(hr)) >= 0)
++#define __stdcall
++#endif
++
+ // ════════════════════════════════════════════════════════════════════════════
+ // Crash dump: VEH that writes a minidump and a human-readable crash report.
+ //
+@@ -46,6 +85,8 @@
+ // Both land in ./crash/ relative to the working directory (typically run/).
+ // ════════════════════════════════════════════════════════════════════════════
+ 
++#ifdef _WIN32
++
+ static const char* exceptionCodeName(DWORD code) {
+     switch (code) {
+         case 0xC0000005: return "EXCEPTION_ACCESS_VIOLATION";
+@@ -287,7 +328,249 @@ static void uninstallCrashHandler() {
+     g_prevFilter = nullptr;
+ }
+ 
+-// Tracy profiling: resolve ___tracy_* symbols from d3d9.dll at runtime so
++#else // POSIX
++
++// ════════════════════════════════════════════════════════════════════════════
++// Crash report (POSIX): fatal-signal handler that writes a human-readable
++// report and then hands the signal to the handler installed before it.
++//
++// The report holds the signal, fault address, faulting module, registers, a
++// backtrace of the faulting thread and the process memory map. It lands in
++// ./crash/ relative to the working directory, like the Windows report. There
++// is no minidump: enable core dumps (ulimit -c, coredumpctl) for deep
++// debugging. The JVM's own hs_err_pid*.log is written as well, because the
++// previous handler is normally the JVM's.
++//
++// The JVM takes SIGSEGV, SIGBUS, SIGFPE and SIGILL for implicit null checks,
++// safepoint polls and similar. Those fault in JIT code or in libjvm, so a
++// report is only written when the faulting instruction is in another loaded
++// library (the Remix runtime, this bridge, the driver), and for SIGABRT.
++// ════════════════════════════════════════════════════════════════════════════
++
++static const int kCrashSignals[] = { SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT };
++static struct sigaction g_prevActions[NSIG];
++static bool g_crashHandlerInstalled = false;
++static std::atomic<int> g_dumping{0};
++
++static void writeStr(int fd, const char* s) {
++    ssize_t unused = write(fd, s, strlen(s));
++    (void)unused;
++}
++
++static void writeHex(int fd, uint64_t v) {
++    char buf[19] = "0x";
++    for (int i = 0; i < 16; i++) {
++        unsigned n = (unsigned)((v >> (60 - 4 * i)) & 0xF);
++        buf[2 + i] = (char)(n < 10 ? '0' + n : 'A' + n - 10);
++    }
++    buf[18] = '\0';
++    writeStr(fd, buf);
++}
++
++static const char* signalName(int sig) {
++    switch (sig) {
++        case SIGSEGV: return "SIGSEGV";
++        case SIGBUS:  return "SIGBUS";
++        case SIGILL:  return "SIGILL";
++        case SIGFPE:  return "SIGFPE";
++        case SIGABRT: return "SIGABRT";
++        default:      return "UNKNOWN";
++    }
++}
++
++static uintptr_t faultPc(const ucontext_t* uc) {
++#if defined(__x86_64__)
++    return (uintptr_t)uc->uc_mcontext.gregs[REG_RIP];
++#elif defined(__aarch64__)
++    return (uintptr_t)uc->uc_mcontext.pc;
++#else
++    (void)uc;
++    return 0;
++#endif
++}
++
++// Resolve an address to "libname.so+0xOFFSET (symbol)" or "(JIT/heap)" if unmapped
++static void formatAddress(int fd, uintptr_t addr) {
++    Dl_info info;
++    if (dladdr((void*)addr, &info) && info.dli_fname) {
++        const char* base = strrchr(info.dli_fname, '/');
++        writeStr(fd, base ? base + 1 : info.dli_fname);
++        writeStr(fd, "+");
++        writeHex(fd, (uint64_t)(addr - (uintptr_t)info.dli_fbase));
++        if (info.dli_sname) {
++            writeStr(fd, " (");
++            writeStr(fd, info.dli_sname);
++            writeStr(fd, ")");
++        }
++        return;
++    }
++    writeHex(fd, (uint64_t)addr);
++    writeStr(fd, " (JIT/heap)");
++}
++
++// True for addresses the JVM owns: JIT code (not in any library) and libjvm.
++static bool isJvmAddress(uintptr_t pc) {
++    Dl_info info;
++    if (!dladdr((void*)pc, &info) || !info.dli_fname) return true;
++    const char* base = strrchr(info.dli_fname, '/');
++    base = base ? base + 1 : info.dli_fname;
++    return strcmp(base, "libjvm.so") == 0;
++}
++
++static void writeRegisters(int fd, const ucontext_t* uc) {
++    writeStr(fd, "\n=== Registers ===\n");
++#if defined(__x86_64__)
++    static const struct { const char* name; int reg; } regs[] = {
++        { "RAX", REG_RAX }, { "RBX", REG_RBX }, { "RCX", REG_RCX }, { "RDX", REG_RDX },
++        { "RSI", REG_RSI }, { "RDI", REG_RDI }, { "RSP", REG_RSP }, { "RBP", REG_RBP },
++        { "R8 ", REG_R8  }, { "R9 ", REG_R9  }, { "R10", REG_R10 }, { "R11", REG_R11 },
++        { "R12", REG_R12 }, { "R13", REG_R13 }, { "R14", REG_R14 }, { "R15", REG_R15 },
++        { "RIP", REG_RIP }, { "EFL", REG_EFL },
++    };
++    for (size_t i = 0; i < sizeof(regs) / sizeof(regs[0]); i++) {
++        writeStr(fd, (i % 4 == 0) ? "  " : "  ");
++        writeStr(fd, regs[i].name);
++        writeStr(fd, "=");
++        writeHex(fd, (uint64_t)uc->uc_mcontext.gregs[regs[i].reg]);
++        if (i % 4 == 3 || i + 1 == sizeof(regs) / sizeof(regs[0])) writeStr(fd, "\n");
++    }
++#elif defined(__aarch64__)
++    for (int i = 0; i < 31; i++) {
++        char name[8];
++        snprintf(name, sizeof(name), "  X%-2d=", i);
++        writeStr(fd, name);
++        writeHex(fd, (uint64_t)uc->uc_mcontext.regs[i]);
++        if (i % 4 == 3) writeStr(fd, "\n");
++    }
++    writeStr(fd, "\n  SP =");
++    writeHex(fd, (uint64_t)uc->uc_mcontext.sp);
++    writeStr(fd, "  PC =");
++    writeHex(fd, (uint64_t)uc->uc_mcontext.pc);
++    writeStr(fd, "\n");
++#else
++    (void)uc;
++#endif
++}
++
++static void copyFile(int fd, const char* path) {
++    int in = open(path, O_RDONLY | O_CLOEXEC);
++    if (in < 0) return;
++    char buf[4096];
++    ssize_t n;
++    while ((n = read(in, buf, sizeof(buf))) > 0) {
++        ssize_t unused = write(fd, buf, (size_t)n);
++        (void)unused;
++    }
++    close(in);
++}
++
++static void writeCrashReport(int sig, const siginfo_t* si, const ucontext_t* uc, uintptr_t pc) {
++    if (g_dumping.exchange(1) != 0)
++        return;
++
++    mkdir("crash", 0755);
++
++    char tag[32];
++    time_t now = time(nullptr);
++    struct tm tm;
++    localtime_r(&now, &tm);
++    snprintf(tag, sizeof(tag), "%04d%02d%02d_%02d%02d%02d",
++             tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
++             tm.tm_hour, tm.tm_min, tm.tm_sec);
++
++    char txtPath[96];
++    snprintf(txtPath, sizeof(txtPath), "crash/crash_report_%s.txt", tag);
++    int fd = open(txtPath, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
++    if (fd < 0) return;
++
++    writeStr(fd, "=== RTX Remix for Minecraft: Crash Report ===\n");
++    writeStr(fd, "No minidump on Linux: see the JVM's hs_err_pid*.log and the core dump, if enabled.\n\n");
++    writeStr(fd, "Signal:    ");
++    writeStr(fd, signalName(sig));
++    char num[64];
++    snprintf(num, sizeof(num), " (%d), code %d\n", sig, si ? si->si_code : 0);
++    writeStr(fd, num);
++    writeStr(fd, "Address:   ");
++    formatAddress(fd, pc);
++    writeStr(fd, "\n");
++    if (si && (sig == SIGSEGV || sig == SIGBUS)) {
++        writeStr(fd, "Fault:     ");
++        writeHex(fd, (uint64_t)(uintptr_t)si->si_addr);
++        writeStr(fd, "\n");
++    }
++    snprintf(num, sizeof(num), "Thread:    %ld\nProcess:   %ld\n", (long)syscall(SYS_gettid), (long)getpid());
++    writeStr(fd, num);
++
++    if (uc) writeRegisters(fd, uc);
++
++    // Only the faulting thread: there is no portable way to walk other threads
++    // from a signal handler. The JVM's hs_err log lists every thread.
++    writeStr(fd, "\n=== Faulting Thread Backtrace ===\n");
++    void* frames[64];
++    int count = backtrace(frames, 64);
++    backtrace_symbols_fd(frames, count, fd);
++
++    writeStr(fd, "\n=== Memory Map (/proc/self/maps) ===\n");
++    copyFile(fd, "/proc/self/maps");
++    close(fd);
++}
++
++// Hand the signal to the handler that was installed before ours.
++static void chainSignal(int sig, siginfo_t* si, void* ucv) {
++    const struct sigaction& prev = g_prevActions[sig];
++    if (prev.sa_flags & SA_SIGINFO) {
++        if (prev.sa_sigaction) {
++            prev.sa_sigaction(sig, si, ucv);
++            return;
++        }
++    } else if (prev.sa_handler == SIG_IGN) {
++        return;
++    } else if (prev.sa_handler != SIG_DFL && prev.sa_handler != nullptr) {
++        prev.sa_handler(sig);
++        return;
++    }
++    // Default action: reinstate it, then re-raise (a fault re-executes on return).
++    signal(sig, SIG_DFL);
++    raise(sig);
++}
++
++static void crashSignalHandler(int sig, siginfo_t* si, void* ucv) {
++    const ucontext_t* uc = (const ucontext_t*)ucv;
++    const uintptr_t pc = uc ? faultPc(uc) : 0;
++    if (sig == SIGABRT || !isJvmAddress(pc)) {
++        writeCrashReport(sig, si, uc, pc);
++    }
++    chainSignal(sig, si, ucv);
++}
++
++static void installCrashHandler() {
++    if (g_crashHandlerInstalled) return;
++    // backtrace() loads libgcc_s on first use, which must not happen inside a signal handler.
++    void* warmup[1];
++    backtrace(warmup, 1);
++
++    struct sigaction sa;
++    memset(&sa, 0, sizeof(sa));
++    sa.sa_sigaction = crashSignalHandler;
++    sa.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_RESTART;
++    sigemptyset(&sa.sa_mask);
++    for (int sig : kCrashSignals) {
++        sigaction(sig, &sa, &g_prevActions[sig]);
++    }
++    g_crashHandlerInstalled = true;
++}
++
++static void uninstallCrashHandler() {
++    if (!g_crashHandlerInstalled) return;
++    for (int sig : kCrashSignals) {
++        sigaction(sig, &g_prevActions[sig], nullptr);
++    }
++    g_crashHandlerInstalled = false;
++}
++
++#endif // _WIN32
++
++// Tracy profiling: resolve ___tracy_* symbols from d3d9.dll (libremix.so on Linux) at runtime so
+ // Java zones appear on the same timeline as dxvk-remix zones. We can't use
+ // TRACY_IMPORTS because we link against the Windows SDK d3d9.lib which
+ // doesn't contain Tracy symbols.
+@@ -314,6 +597,11 @@ static std::mutex           s_tracyMutex;
+ static bool                 s_tracyResolved = false;
+ static bool                 s_tracyAvailable = false;
+ static bool                 s_tracyEnabled = false;
++#ifndef _WIN32
++// The loaded runtime library, set by initializeRuntime. A Linux runtime only
++// exposes Tracy when its export map includes the ___tracy_* symbols.
++static void*                s_tracyLibrary = nullptr;
++#endif
+ 
+ static void resetTracyFunctionsLocked() {
+     s_allocSrclocName = nullptr;
+@@ -331,16 +619,24 @@ static bool initTracyFunctionsLocked() {
+     if (!s_tracyEnabled) return false;
+     if (s_tracyResolved) return s_tracyAvailable;
+ 
++#ifdef _WIN32
+     HMODULE d3d9 = GetModuleHandleA("d3d9.dll");
+     if (!d3d9) return false;
++#define TRACY_SYMBOL(name) GetProcAddress(d3d9, name)
++#else
++    void* d3d9 = s_tracyLibrary;
++    if (!d3d9) return false;
++#define TRACY_SYMBOL(name) dlsym(d3d9, name)
++#endif
+ 
+-    s_allocSrclocName    = (FnAllocSrclocName)   GetProcAddress(d3d9, "___tracy_alloc_srcloc_name");
+-    s_emitZoneBeginAlloc = (FnEmitZoneBeginAlloc)GetProcAddress(d3d9, "___tracy_emit_zone_begin_alloc");
+-    s_emitZoneEnd        = (FnEmitZoneEnd)       GetProcAddress(d3d9, "___tracy_emit_zone_end");
+-    s_setThreadName      = (FnSetThreadName)     GetProcAddress(d3d9, "___tracy_set_thread_name");
+-    s_emitPlot           = (FnEmitPlot)          GetProcAddress(d3d9, "___tracy_emit_plot");
+-    s_emitMessage        = (FnEmitMessage)       GetProcAddress(d3d9, "___tracy_emit_message");
+-    s_emitFrameMark      = (FnEmitFrameMark)     GetProcAddress(d3d9, "___tracy_emit_frame_mark");
++    s_allocSrclocName    = (FnAllocSrclocName)   TRACY_SYMBOL("___tracy_alloc_srcloc_name");
++    s_emitZoneBeginAlloc = (FnEmitZoneBeginAlloc)TRACY_SYMBOL("___tracy_emit_zone_begin_alloc");
++    s_emitZoneEnd        = (FnEmitZoneEnd)       TRACY_SYMBOL("___tracy_emit_zone_end");
++    s_setThreadName      = (FnSetThreadName)     TRACY_SYMBOL("___tracy_set_thread_name");
++    s_emitPlot           = (FnEmitPlot)          TRACY_SYMBOL("___tracy_emit_plot");
++    s_emitMessage        = (FnEmitMessage)       TRACY_SYMBOL("___tracy_emit_message");
++    s_emitFrameMark      = (FnEmitFrameMark)     TRACY_SYMBOL("___tracy_emit_frame_mark");
++#undef TRACY_SYMBOL
+ 
+     s_tracyAvailable = s_allocSrclocName && s_emitZoneBeginAlloc && s_emitZoneEnd;
+     s_tracyResolved = true;
+@@ -351,7 +647,11 @@ static bool initTracyFunctionsLocked() {
+ // Global state: filled by initialize(), read by every other function.
+ // ════════════════════════════════════════════════════════════════════════════
+ 
++#ifdef _WIN32
+ static HMODULE          g_remixDll   = nullptr;
++#else
++static void*            g_remixDll   = nullptr;
++#endif
+ static remixapi_Interface g_remix    = {};
+ static bool             g_inited     = false;
+ 
+@@ -496,6 +796,70 @@ bool setJavaInstanceField(JNIEnv *env, jclass java_class,
+ }
+ } // namespace
+ 
++static jint initializeLoadedRuntime(PFN_remixapi_InitializeLibrary pfnInit);
++
++#ifndef _WIN32
++// JNI's GetStringUTFChars returns modified UTF-8 (surrogate pairs encoded
++// separately, NUL as two bytes), so file paths go through UTF-16 instead.
++static std::u16string javaStringUtf16(JNIEnv* env, jstring s)
++{
++    if (!s) return {};
++    const jsize length = env->GetStringLength(s);
++    std::u16string out((size_t)length, u'\0');
++    env->GetStringRegion(s, 0, length, (jchar*)out.data());
++    return out;
++}
++
++// Decodes one code point from UTF-16 at i, advancing i. Lone surrogates become U+FFFD.
++static char32_t nextCodePoint(const std::u16string& s, size_t& i)
++{
++    char32_t c = s[i++];
++    if (c >= 0xD800 && c <= 0xDBFF && i < s.size() && s[i] >= 0xDC00 && s[i] <= 0xDFFF) {
++        c = 0x10000 + ((c - 0xD800) << 10) + (s[i++] - 0xDC00);
++    } else if (c >= 0xD800 && c <= 0xDFFF) {
++        c = 0xFFFD;
++    }
++    return c;
++}
++
++static std::string javaStringToUtf8(JNIEnv* env, jstring s)
++{
++    const std::u16string u16 = javaStringUtf16(env, s);
++    std::string out;
++    for (size_t i = 0; i < u16.size();) {
++        const char32_t c = nextCodePoint(u16, i);
++        if (c < 0x80) {
++            out += (char)c;
++        } else if (c < 0x800) {
++            out += (char)(0xC0 | (c >> 6));
++            out += (char)(0x80 | (c & 0x3F));
++        } else if (c < 0x10000) {
++            out += (char)(0xE0 | (c >> 12));
++            out += (char)(0x80 | ((c >> 6) & 0x3F));
++            out += (char)(0x80 | (c & 0x3F));
++        } else {
++            out += (char)(0xF0 | (c >> 18));
++            out += (char)(0x80 | ((c >> 12) & 0x3F));
++            out += (char)(0x80 | ((c >> 6) & 0x3F));
++            out += (char)(0x80 | (c & 0x3F));
++        }
++    }
++    return out;
++}
++
++// remixapi_Path is wchar_t, which is UTF-32 on Linux.
++static std::wstring javaStringToWide(JNIEnv* env, jstring s)
++{
++    const std::u16string u16 = javaStringUtf16(env, s);
++    std::wstring out;
++    for (size_t i = 0; i < u16.size();) {
++        out += (wchar_t)nextCodePoint(u16, i);
++    }
++    return out;
++}
++#endif
++
++#ifdef _WIN32
+ static jint initializeRuntime(const wchar_t* dllPath)
+ {
+     // Extract parent directory for SetDllDirectoryW
+@@ -522,6 +886,44 @@ static jint initializeRuntime(const wchar_t* dllPath)
+         g_remixDll = nullptr;
+         return REMIXAPI_ERROR_CODE_GET_PROC_ADDRESS_FAILURE;
+     }
++    return initializeLoadedRuntime(pfnInit);
++}
++#else
++static jint initializeRuntime(const char* libPath)
++{
++    // RTLD_LOCAL keeps the runtime's symbols out of the global namespace. Its
++    // own dependencies resolve through its RUNPATH and the system loader path.
++    g_remixDll = dlopen(libPath, RTLD_NOW | RTLD_LOCAL);
++    if (!g_remixDll) {
++        fprintf(stderr, "[remixbridge] dlopen(%s) failed: %s\n", libPath, dlerror());
++        fflush(stderr);
++        return REMIXAPI_ERROR_CODE_LOAD_LIBRARY_FAILURE;
++    }
++
++    auto pfnInit = (PFN_remixapi_InitializeLibrary)
++        dlsym(g_remixDll, "remixapi_InitializeLibrary");
++    if (!pfnInit) {
++        dlclose(g_remixDll);
++        g_remixDll = nullptr;
++        return REMIXAPI_ERROR_CODE_GET_PROC_ADDRESS_FAILURE;
++    }
++    return initializeLoadedRuntime(pfnInit);
++}
++#endif
++
++static void freeRuntimeLibrary()
++{
++    if (!g_remixDll) return;
++#ifdef _WIN32
++    FreeLibrary(g_remixDll);
++#else
++    dlclose(g_remixDll);
++#endif
++    g_remixDll = nullptr;
++}
++
++static jint initializeLoadedRuntime(PFN_remixapi_InitializeLibrary pfnInit)
++{
+ 
+     remixapi_InitializeLibraryInfo initInfo = {};
+     initInfo.sType   = REMIXAPI_STRUCT_TYPE_INITIALIZE_LIBRARY_INFO;
+@@ -547,8 +949,7 @@ static jint initializeRuntime(const wchar_t* dllPath)
+                 REMIXAPI_VERSION_MAJOR, REMIXAPI_VERSION_MINOR, REMIXAPI_VERSION_PATCH);
+             fflush(stderr);
+             memset(&g_remix, 0, sizeof(g_remix));
+-            FreeLibrary(g_remixDll);
+-            g_remixDll = nullptr;
++            freeRuntimeLibrary();
+             return REMIXAPI_ERROR_CODE_INCOMPATIBLE_VERSION;
+         }
+         g_inited = true;
+@@ -556,6 +957,9 @@ static jint initializeRuntime(const wchar_t* dllPath)
+             std::lock_guard<std::mutex> lock(s_tracyMutex);
+             s_tracyEnabled = true;
+             resetTracyFunctionsLocked();
++#ifndef _WIN32
++            s_tracyLibrary = g_remixDll;
++#endif
+         }
+         installCrashHandler();
+     }
+@@ -573,7 +977,12 @@ extern "C" {
+ // Plain C entry point used by the developer tools in a short-lived subprocess.
+ // It deliberately follows the same initialization path as Java so this bridge,
+ // not the launcher, remains the authority on Remix API compatibility.
+-__declspec(dllexport) jint remixbridge_probe_runtime(const wchar_t* dllPath)
++#ifdef _WIN32
++REMIXBRIDGE_EXPORT jint remixbridge_probe_runtime(const wchar_t* dllPath)
++#else
++// On Linux the path is UTF-8.
++REMIXBRIDGE_EXPORT jint remixbridge_probe_runtime(const char* dllPath)
++#endif
+ {
+     if (!dllPath || !dllPath[0]) {
+         return REMIXAPI_ERROR_CODE_LOAD_LIBRARY_FAILURE;
+@@ -581,6 +990,14 @@ __declspec(dllexport) jint remixbridge_probe_runtime(const wchar_t* dllPath)
+     return initializeRuntime(dllPath);
+ }
+ 
++#ifndef _WIN32
++JNIEXPORT jint JNICALL
++Java_com_nvidia_rtxremix_RemixBridge_initialize(JNIEnv* env, jclass, jstring jDllPath)
++{
++    const std::string path = javaStringToUtf8(env, jDllPath);
++    return initializeRuntime(path.c_str());
++}
++#else
+ JNIEXPORT jint JNICALL
+ Java_com_nvidia_rtxremix_RemixBridge_initialize(JNIEnv* env, jclass, jstring jDllPath)
+ {
+@@ -595,9 +1012,11 @@ Java_com_nvidia_rtxremix_RemixBridge_initialize(JNIEnv* env, jclass, jstring jDl
+ 
+     return initializeRuntime(wpath);
+ }
++#endif
+ 
+ // ─── process command line ────────────────────────────────────────────────
+ 
++#ifdef _WIN32
+ // Crash dumps copy the process parameters out of the PEB, so this is the copy
+ // a redaction must reach.
+ static UNICODE_STRING& pebCommandLine() {
+@@ -651,6 +1070,158 @@ Java_com_nvidia_rtxremix_RemixBridge_overwriteProcessCommandLine(JNIEnv* env, jc
+     return REMIXAPI_ERROR_CODE_SUCCESS;
+ }
+ 
++#else // POSIX
++
++// The kernel serves /proc/<pid>/cmdline, which other local users can read,
++// straight from the process's argument area. /proc/self/stat locates that area
++// (fields 48 and 49, arg_start and arg_end), so blanking there is what keeps a
++// value out of ps output and out of core dumps of this process.
++//
++// CommandLineRedaction works on a Windows command line, so the arguments are
++// presented with CommandLineToArgvW quoting, and every presented UTF-16 unit
++// remembers the argument bytes it came from. Quoting characters map to none.
++struct PresentedCommandLine {
++    std::u16string text;
++    std::vector<std::pair<long, int>> source; // (byte offset, byte count), offset -1 for quoting
++    char* argStart = nullptr;
++};
++
++static bool argumentArea(char** start, char** end)
++{
++    int fd = open("/proc/self/stat", O_RDONLY | O_CLOEXEC);
++    if (fd < 0) return false;
++    char buf[4096];
++    ssize_t n = read(fd, buf, sizeof(buf) - 1);
++    close(fd);
++    if (n <= 0) return false;
++    buf[n] = '\0';
++    // Fields after the parenthesised command name start with field 3.
++    char* p = strrchr(buf, ')');
++    if (!p) return false;
++    p++;
++    unsigned long long values[50] = {};
++    int field = 3;
++    while (*p && field <= 49) {
++        while (*p == ' ') p++;
++        values[field] = strtoull(p, &p, 10);
++        if (*p && *p != ' ') {
++            while (*p && *p != ' ') p++; // non-numeric field (state)
++        }
++        field++;
++    }
++    if (field <= 49 || values[48] == 0 || values[49] <= values[48]) return false;
++    *start = (char*)(uintptr_t)values[48];
++    *end = (char*)(uintptr_t)values[49];
++    return true;
++}
++
++static void presentUnit(PresentedCommandLine& out, char16_t unit, long offset, int count)
++{
++    out.text += unit;
++    out.source.emplace_back(offset, count);
++}
++
++static bool presentCommandLine(PresentedCommandLine& out)
++{
++    char* start = nullptr;
++    char* end = nullptr;
++    if (!argumentArea(&start, &end)) return false;
++    out.argStart = start;
++    const long size = (long)(end - start);
++
++    long pos = 0;
++    bool first = true;
++    while (pos < size) {
++        const long argBegin = pos;
++        while (pos < size && start[pos] != '\0') pos++;
++        const long argEnd = pos;
++        pos++; // NUL
++
++        if (!first) presentUnit(out, u' ', -1, 0);
++        first = false;
++
++        bool quote = argBegin == argEnd;
++        for (long i = argBegin; i < argEnd; i++) {
++            if (start[i] == ' ' || start[i] == '\t' || start[i] == '"') quote = true;
++        }
++        if (quote) presentUnit(out, u'"', -1, 0);
++
++        long backslashes = 0;
++        for (long i = argBegin; i < argEnd;) {
++            const unsigned char c = (unsigned char)start[i];
++            if (c == '\\') {
++                backslashes++;
++                presentUnit(out, u'\\', i, 1);
++                i++;
++                continue;
++            }
++            if (c == '"') {
++                // Backslashes before a quote are doubled and the quote escaped.
++                for (long b = 0; b < backslashes + 1; b++) presentUnit(out, u'\\', -1, 0);
++                presentUnit(out, u'"', -1, 0);
++                backslashes = 0;
++                i++;
++                continue;
++            }
++            backslashes = 0;
++            // UTF-8 sequence to UTF-16, mapped to all of its bytes.
++            int len = c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3 : (c >> 3) == 0x1E ? 4 : 1;
++            if (i + len > argEnd) len = 1;
++            char32_t cp = len == 1 ? (c < 0x80 ? c : 0xFFFD)
++                        : len == 2 ? (c & 0x1F) : len == 3 ? (c & 0x0F) : (c & 0x07);
++            for (int k = 1; k < len; k++) cp = (cp << 6) | ((unsigned char)start[i + k] & 0x3F);
++            if (cp >= 0x10000) {
++                cp -= 0x10000;
++                presentUnit(out, (char16_t)(0xD800 + (cp >> 10)), i, len);
++                presentUnit(out, (char16_t)(0xDC00 + (cp & 0x3FF)), -1, 0);
++            } else {
++                presentUnit(out, (char16_t)cp, i, len);
++            }
++            i += len;
++        }
++        if (quote) {
++            // Trailing backslashes before the closing quote are doubled.
++            for (long b = 0; b < backslashes; b++) presentUnit(out, u'\\', -1, 0);
++            presentUnit(out, u'"', -1, 0);
++        }
++    }
++    return true;
++}
++
++JNIEXPORT jstring JNICALL
++Java_com_nvidia_rtxremix_RemixBridge_processCommandLine(JNIEnv* env, jclass)
++{
++    PresentedCommandLine line;
++    if (!presentCommandLine(line)) return env->NewStringUTF("");
++    return env->NewString((const jchar*)line.text.data(), (jsize)line.text.size());
++}
++
++JNIEXPORT jint JNICALL
++Java_com_nvidia_rtxremix_RemixBridge_overwriteProcessCommandLine(JNIEnv* env, jclass,
++    jstring jReplacement)
++{
++    PresentedCommandLine line;
++    if (!presentCommandLine(line)) return REMIXAPI_ERROR_CODE_GENERAL_FAILURE;
++    const jsize length = (jsize)line.text.size();
++    if (!jReplacement || env->GetStringLength(jReplacement) != length)
++        return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
++
++    std::u16string replacement((size_t)length, u'\0');
++    env->GetStringRegion(jReplacement, 0, length, (jchar*)replacement.data());
++
++    // The redaction only turns characters into '*'. Each changed unit blanks
++    // all bytes of its source character, so argument lengths stay the same.
++    for (jsize i = 0; i < length; i++) {
++        const auto& src = line.source[(size_t)i];
++        if (replacement[(size_t)i] == line.text[(size_t)i] || src.first < 0) continue;
++        if (replacement[(size_t)i] != u'*') return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
++        memset(line.argStart + src.first, '*', (size_t)src.second);
++    }
++    return REMIXAPI_ERROR_CODE_SUCCESS;
++}
++
++#endif // _WIN32
++
+ // ─── lifecycle ───────────────────────────────────────────────────────────
+ 
+ JNIEXPORT jint JNICALL
+@@ -681,9 +1252,12 @@ Java_com_nvidia_rtxremix_RemixBridge_shutdown(JNIEnv*, jclass)
+         std::lock_guard<std::mutex> lock(s_tracyMutex);
+         s_tracyEnabled = false;
+         resetTracyFunctionsLocked();
++#ifndef _WIN32
++        s_tracyLibrary = nullptr;
++#endif
+     }
+     jint rc = (jint)shutdown();
+-    if (g_remixDll) { FreeLibrary(g_remixDll); g_remixDll = nullptr; }
++    freeRuntimeLibrary();
+     memset(&g_remix, 0, sizeof(g_remix));
+     return rc;
+ }
+@@ -708,9 +1282,13 @@ Java_com_nvidia_rtxremix_RemixBridge_present(JNIEnv*, jclass,
+     jint disableCpuWaitForExternalSemaphores)
+ {
+     if (!g_inited || !g_remix.Present) return REMIXAPI_ERROR_CODE_NOT_INITIALIZED;
++#ifdef _WIN32
+     if (hwndOverride == 0) {
+         return (jint)g_remix.Present(nullptr);
+     }
++#endif
++    // Linux: there is no window handle to pass, and the headless runtime needs
++    // the rest of the info (skipVulkanSwapchain, interop), so it always goes along.
+     remixapi_PresentInfo info = {};
+     info.sType        = REMIXAPI_STRUCT_TYPE_PRESENT_INFO;
+     info.hwndOverride = (HWND)(uintptr_t)hwndOverride;
+@@ -862,11 +1440,16 @@ Java_com_nvidia_rtxremix_RemixBridge_createTextureFromFile(JNIEnv* env, jclass,
+ {
+     if (!g_inited || !g_remix.CreateTextureFromFile) return 0;
+ 
++#ifndef _WIN32
++    const std::wstring wide = javaStringToWide(env, jPath);
++    const wchar_t* wpath = wide.c_str();
++#else
+     const char* utf8 = env->GetStringUTFChars(jPath, nullptr);
+     int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, nullptr, 0);
+     wchar_t* wpath = (wchar_t*)_alloca(wlen * sizeof(wchar_t));
+     MultiByteToWideChar(CP_UTF8, 0, utf8, -1, wpath, wlen);
+     env->ReleaseStringUTFChars(jPath, utf8);
++#endif
+ 
+     remixapi_TextureHandle handle = nullptr;
+     remixapi_ErrorCode rc = g_remix.CreateTextureFromFile(wpath, &handle);
+@@ -1497,8 +2080,15 @@ JNIEXPORT jint JNICALL
+ Java_com_nvidia_rtxremix_RemixBridge_d3d9Release(JNIEnv*, jclass, jlong comPtr)
+ {
+     if (comPtr == 0) return 0;
++#ifdef _WIN32
+     auto pUnk = (IUnknown*)(uintptr_t)comPtr;
+     return (jint)pUnk->Release();
++#else
++    // DXVK native objects keep the COM vtable layout: IUnknown::Release is slot 2.
++    void** vtable = *(void***)(uintptr_t)comPtr;
++    typedef uint32_t (*PFN_Release)(void*);
++    return (jint)((PFN_Release)vtable[2])((void*)(uintptr_t)comPtr);
++#endif
+ }
+ 
+ // ─── extension allocation ────────────────────────────────────────────────
+@@ -1945,6 +2535,24 @@ JNIEXPORT void JNICALL Java_com_nvidia_rtxremix_RemixBridge_tracyFrameMark(
+ }
+ 
+ typedef uint64_t GLuint64;
++
++#ifdef _WIN32
++#define glGetProcAddress(name) wglGetProcAddress(name)
++#else
++// Resolves through the loader of whichever GL context the process uses (GLX on
++// X11/XWayland, EGL on Wayland). The GL libraries are already loaded by LWJGL.
++static void* glGetProcAddress(const char* name)
++{
++    typedef void* (*PFN_getProcAddress)(const char*);
++    static PFN_getProcAddress glx = (PFN_getProcAddress)dlsym(RTLD_DEFAULT, "glXGetProcAddressARB");
++    static PFN_getProcAddress egl = (PFN_getProcAddress)dlsym(RTLD_DEFAULT, "eglGetProcAddress");
++    void* fn = nullptr;
++    if (glx) fn = glx(name);
++    if (!fn && egl) fn = egl(name);
++    if (!fn) fn = dlsym(RTLD_DEFAULT, name);
++    return fn;
++}
++#endif
+ typedef void (*PFNGLCREATESEMAPHORESNVPROC)(GLsizei n, GLuint* semaphores);
+ typedef void (*PFNGLSEMAPHOREPARAMETERIVNVPROC)(GLuint semaphore, GLenum pname, const GLint* params);
+ typedef void (*PFNGLSEMAPHOREPARAMETERUI64VEXTPROC)(GLuint semaphore, GLenum pname, const GLuint64* params);
+@@ -1956,7 +2564,7 @@ Java_com_nvidia_rtxremix_RemixBridge_openglSemaphoreParameterui64vEXT(JNIEnv* en
+ 
+     static PFNGLSEMAPHOREPARAMETERUI64VEXTPROC glSemaphoreParameterui64vEXT = nullptr;
+     if (!glSemaphoreParameterui64vEXT) {
+-      glSemaphoreParameterui64vEXT = (PFNGLSEMAPHOREPARAMETERUI64VEXTPROC)wglGetProcAddress("glSemaphoreParameterui64vEXT");
++      glSemaphoreParameterui64vEXT = (PFNGLSEMAPHOREPARAMETERUI64VEXTPROC)glGetProcAddress("glSemaphoreParameterui64vEXT");
+       if (!glSemaphoreParameterui64vEXT) {
+         return -2; // not found
+       };
+@@ -1974,7 +2582,7 @@ Java_com_nvidia_rtxremix_RemixBridge_openglSemaphoreParameterivNV(JNIEnv* env, j
+ 
+     static PFNGLSEMAPHOREPARAMETERIVNVPROC glSemaphoreParameterivNV = nullptr;
+     if (!glSemaphoreParameterivNV) {
+-      glSemaphoreParameterivNV = (PFNGLSEMAPHOREPARAMETERIVNVPROC)wglGetProcAddress("glSemaphoreParameterivNV");
++      glSemaphoreParameterivNV = (PFNGLSEMAPHOREPARAMETERIVNVPROC)glGetProcAddress("glSemaphoreParameterivNV");
+       if (!glSemaphoreParameterivNV) {
+         return -2; // not found
+       };
+@@ -1992,7 +2600,7 @@ Java_com_nvidia_rtxremix_RemixBridge_openglCreateSemaphoresNV(JNIEnv* env, jclas
+ 
+     static PFNGLCREATESEMAPHORESNVPROC glCreateSemaphoresNV = nullptr;
+     if (!glCreateSemaphoresNV) {
+-      glCreateSemaphoresNV = (PFNGLCREATESEMAPHORESNVPROC)wglGetProcAddress("glCreateSemaphoresNV");
++      glCreateSemaphoresNV = (PFNGLCREATESEMAPHORESNVPROC)glGetProcAddress("glCreateSemaphoresNV");
+       if (!glCreateSemaphoresNV) {
+         return 0; // not found
+       };
+-- 
+2.43.0
+

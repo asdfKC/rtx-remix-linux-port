@@ -446,3 +446,39 @@ mechanism the `RtxOptionLayerAction` graph component uses):
   - If blocks look washed out compared with Windows, set `REMIX_LINUX_COLOR_UNORM_AS_SRGB=1`. It samples 8-bit UNORM
     COLOR textures as sRGB without a rebuild. Please report which one matches.
 - **Normal-map orientation:** if bumps look inverted, the DX/OGL Y flip is the place to look.
+
+## Phase D step 1: JNI bridge on POSIX (2026-10-26)
+
+**Status:** compiles, links, and runs against `libremix.so` on lavapipe from Java. **Not verified on GPU.**
+Mod base `f2c6fda`, branch `linux-port`, series in `patches/rtx-remix-minecraft/`.
+
+- **Windows code is unchanged:** every POSIX difference is behind `#ifdef _WIN32`. With the `_WIN32` conditionals
+  resolved, the file differs from the original only in comments and four mechanical refactors: an export macro, a
+  `TRACY_SYMBOL` macro, `freeRuntimeLibrary()`, and a `glGetProcAddress` alias for `wglGetProcAddress`. MSVC was not run.
+- **Loading:** `dlopen(RTLD_NOW | RTLD_LOCAL)` and `dlsym`. Paths are converted from UTF-16 rather than JNI's
+  modified UTF-8. `remixapi_Path` is UTF-32 on Linux.
+- **Crash reports:** a fatal-signal handler replaces the unhandled-exception filter and minidump.
+  - It writes `crash/crash_report_<time>.txt`: signal, fault address and module, registers, faulting-thread backtrace,
+    and `/proc/self/maps`.
+  - It then chains to the previous handler, normally the JVM's, which writes `hs_err_pid*.log`.
+  - Faults in JIT code or in libjvm (implicit null checks, safepoint polls) go straight to the JVM.
+  - There is no Toolhelp equivalent, so other threads are not walked; the hs_err log lists them.
+  - Verified in the container: a Java NPE is still handled, and a deliberate fault in the bridge produces both reports
+    (`tests/java/CrashSmoke.java`).
+- **Command-line redaction:** the mod blanks account tokens before the runtime loads. On Linux the kernel serves
+  `/proc/<pid>/cmdline`, which other local users can read, from the argument area.
+  - The bridge presents that area in `CommandLineToArgvW` quoting, so the Java redaction code is unchanged, and maps
+    each blanked character back to its bytes.
+  - Tested: `--accessToken 'sécret tök'` and `--accessToken=abc123` both show as `*` in `/proc/self/cmdline`
+    (`tests/java/BridgeSmoke.java`).
+  - Prism passes the token on stdin rather than in argv, so in practice there is usually nothing to blank.
+- **Present** always passes `PresentInfo` on Linux. Windows keeps its `Present(nullptr)` shortcut when there is no
+  window handle.
+- **GL semaphore functions** (`glSemaphoreParameterui64vEXT`, NV semaphore calls) are resolved through
+  `glXGetProcAddressARB`, then `eglGetProcAddress`. No GL library is linked.
+- **Tracy** symbols are looked up with `dlsym` in the loaded runtime. The Linux runtime's export map (`linux/remix.map`)
+  does not export `___tracy_*`, so Tracy zones are unavailable on Linux. The bridge skips them silently, as Windows
+  does without a Tracy build.
+- **Build:** `rtxremix-java/native/CMakeLists.txt` builds `build/native/linux64/libremixbridge.so`. It depends only on
+  libstdc++, libc and libm, and every symbol must resolve at link time (`--no-undefined`). `remix_c.h` takes the
+  runtime's POSIX header block.
