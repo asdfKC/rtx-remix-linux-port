@@ -531,3 +531,37 @@ the new bridge natives run in the container. **Nothing has run inside Minecraft,
 
 ### Known gaps for the mod on Linux
 - `RemixInputGate` and the packaged `rtx.conf` hotkey chord were written for Windows input. Not reviewed yet.
+
+## Phase D step 3: Gradle on Linux (2026-10-26)
+
+**Status:** the build script evaluates. The Linux tasks run in the container (staging, CMake bridge, jar
+assembly) with a local stand-in for Loom. **The real Loom build (Minecraft remap, compileJava) has not run here.**
+This environment blocks maven.fabricmc.net and Mojang's servers.
+
+### What changed (patch 0003)
+- **`gradlew`:** Gradle's POSIX wrapper script, generated offline by the preinstalled Gradle for the pinned
+  9.3.1 distribution.
+  - The checked-in `gradle-wrapper.jar` and `gradle-wrapper.properties` are unchanged. The properties pin
+    `distributionSha256Sum`, so the wrapper verifies what it downloads.
+  - Wrapper jar sha256: `d3b261c2820e9e3d8d639ed084900f11f4a86050a8f83342ade7b6bc9b0d2bdd`. Compare it with the
+    "Wrapper JAR Checksum" for 9.3.1 on https://gradle.org/release-checksums/ before the first run.
+- **`linux64` target:** the only target on a Linux host, and the default. The jar is named `…-linux64.jar`. Windows
+  defaults are unchanged.
+- **`stageLinuxRuntime -PlinuxRuntime=<libremix.so|dir> [-PlinuxDlssDir=<dir>]`** copies the runtime and the
+  `libnvidia-ngx-*.so.*` DLSS feature libraries into `remix-runtime/linux64`, with `.local-sdk-source`.
+  - The DLSS default is `<work>/dxvk-remix/submodules/dlss/lib/Linux_x86_64/rel`, the `build-runtime.sh` layout. This
+    covers the side item "DLSS libs aren't copied next to libremix.so". Whether NGX finds them there is a GPU check.
+- **`compileNativeLinux64`:** CMake build of `libremixbridge.so`.
+- **`syncRuntimeSdk` / `packageJar` / `verifyPackageJar`:** they know the Linux file names.
+- **`fetchRuntimeTextures`** uses Packman's POSIX script. This is the repository's own Packman pin: it downloads
+  NVIDIA's Packman Python bootstrap and the `rtx_remix_minecraft_runtime_textures@1.1.0` package from NVIDIA's CDN.
+- **`migrateDevelopmentResourcePacks`** (PowerShell, Windows-only legacy packs) is skipped on Linux.
+
+### Checks in the container (scratch copy with a Loom stand-in; offline Gradle 8.14.3)
+- `tasks --all` evaluates, and `fetchRuntimeSdkLinux64` fails with the staging instructions while nothing is staged.
+- `stageLinuxRuntime` staged `libremix.so` and the three DLSS 310.9.1 libraries. `compileNativeLinux64` built the bridge.
+- `packageJar` produced `native/remix-sdk-linux64/{libremix.so, libremixbridge.so, libnvidia-ngx-dlss*.so.310.9.1}`,
+  `native/rtx.conf`, the conf payload and the license texts.
+- `verifyPackageJar` found every native entry. It reported only `fabric.mod.json` missing, which comes from the real
+  `remapJar` and not from the stand-in.
+- **Jar size:** about 160 MB. `libremix.so` is 318 MB with no debug info: 275 MB of it is `.rodata`, the embedded shaders.
