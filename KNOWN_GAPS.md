@@ -23,3 +23,8 @@ exists but reports unsupported.
 | Shader parity with NVIDIA's internal slang | unknown | Public slang + 2 cherry-picks; NVIDIA's 39 private commits are not public |
 | Fast Shutdown | open | `Shutdown` waits for the background shader-pipeline prewarm to finish (`RtxInitializer::waitForShaderPrewarm`, about 13 s on the 5070 with a cold cache, about 30 s on lavapipe). The pipeline compile workers cannot be cancelled, so there is no simple fix. Workaround: `RTX_ASYNC_SHADER_PREWARMING=0` makes Shutdown fast, but pipelines then compile on first use, which causes stutters. A warm driver shader cache should shorten it |
 | Destroying a mesh that live scene instances use | not handled | Such an instance draws nothing and does not crash (see PORTING_NOTES step 2) |
+| Texture mip regeneration on update | whole chain | `UpdateTextureFromMemory` regenerates every mip of the patched texture, not only the patched rect. The cost scales with texture size (an animated 4096² atlas is about 22 M texels per update) |
+| Mips of octahedral normal maps | approximate | Mips average the encoded values. Fine for the mod's 8-bit maps, not renormalised |
+| sRGB interpretation of RGBA8_UNORM color textures | open question | Sampled as linear per the 0.16 header. `REMIX_LINUX_COLOR_UNORM_AS_SRGB=1` switches it for comparison on GPU |
+| `CreateTextureFromFile` decode errors | asynchronous | A missing path fails straight away. A file that exists but does not decode gives a valid, empty (untextured) handle and an error in the log |
+| Materials created before their textures | untextured | Texture handles resolve when the material is created on the CS thread. The mod creates textures first |

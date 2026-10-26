@@ -1,7 +1,7 @@
 From ac5a243ffd948add38c0a2ec4151dd9a38964c4d Mon Sep 17 00:00:00 2001
 From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
 Date: Mon, 26 Oct 2026 01:26:43 +0000
-Subject: [PATCH 8/8] remix api: retained scene instances, Submit,
+Subject: [PATCH 8/9] remix api: retained scene instances, Submit,
  UpdateMaterial
 
 SceneInstanceAdd/Update/Remove keep converted ExternalDrawState on the CS

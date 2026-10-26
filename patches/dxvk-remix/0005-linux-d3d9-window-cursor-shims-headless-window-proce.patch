@@ -1,7 +1,7 @@
 From 494cbc2aa3ca7076abf7067114e42dcad31dd93c Mon Sep 17 00:00:00 2001
 From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
 Date: Sun, 25 Oct 2026 23:12:58 +0000
-Subject: [PATCH 5/8] linux: d3d9 window/cursor shims, headless window
+Subject: [PATCH 5/9] linux: d3d9 window/cursor shims, headless window
  procedure, misc GCC fixes
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

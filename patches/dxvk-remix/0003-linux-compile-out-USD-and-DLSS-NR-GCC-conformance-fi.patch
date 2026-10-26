@@ -1,7 +1,7 @@
 From 1126a1c6d86a592bf2acfb6ddc466360ba7dcced Mon Sep 17 00:00:00 2001
 From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
 Date: Sun, 25 Oct 2026 22:27:15 +0000
-Subject: [PATCH 3/8] linux: compile out USD and DLSS-NR, GCC conformance
+Subject: [PATCH 3/9] linux: compile out USD and DLSS-NR, GCC conformance
  fixes, NVAPI SAL shims
 
 - REMIX_NO_USD guards for material/light USD deserialization, a no-op

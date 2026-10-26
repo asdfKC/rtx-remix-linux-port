@@ -355,3 +355,94 @@ runtime has no readback yet, and that needs the interop image.
   no instance refers to them (`retireTransientMeshes`). The mod's other destroy paths have not been checked.
 - `SubmitInfo` has no fields the runtime uses yet. In 0.16 the frame should render into the interop image;
   that is part of the FD interop work.
+
+## Phase C step 3: textures and config layers (2026-10-26)
+
+**Status:** compiles, links, and passes a software-Vulkan smoke test (lavapipe). **Not verified on GPU.**
+No pixels have been checked. lavapipe runs the upload and mip passes, but nothing reads the results back.
+With this step every 0.16 entry point is implemented except `dxvk_GetInteropInfo`, which is still `GENERAL_FAILURE` (interop work).
+
+### Behaviour, taken from the mod
+- `RemixAssetBase.create(..., disposeData)` returns the pixel buffer to a pool right after `CreateTextureFromMemory`.
+  `AtlasAnimationForwarder` and `SkyRenderer` reuse their patch buffers too, so the runtime copies all pixel data
+  during the call.
+- The mod uses these combinations:
+  - RGBA8_UNORM with COLOR, DATA and NORMAL_DX.
+  - R8_UNORM with HEIGHTMAP and DATA.
+  - RGBA16_SFLOAT for the sky (created and patched every update).
+  - `.dds` files through `CreateTextureFromFile`: the overcast dome and the water normal.
+- `UpdateTextureFromMemory` is batched. The bridge validates every patch before the call, and the header says
+  patches must already be in the texture's format.
+- Config layers are acquired once per conf file at a fixed priority (3000 to 20000). Their strength is then driven
+  every frame (`ConfLayerDriver`).
+
+### Textures (`rtx_remix_api.cpp`)
+- **Handles** are minted by the runtime from a counter, so they are never 0 and never reused. `info->hash` becomes
+  the image hash. The caller thread keeps a record of every live texture (size, format, purpose), so
+  `Update`/`Destroy` on an unknown handle, and out-of-bounds or wrong-format patches, return
+  `INVALID_ARGUMENTS` straight away.
+- **Conversion** happens on the caller thread, into a tightly packed copy:
+  - BGRA is swizzled to RGBA.
+  - `NORMAL_DX`/`NORMAL_OGL` (from RGBA8, BGRA8 or RG8, where Z is reconstructed) become 2-channel unsigned octahedral
+    (RG8). That is what the material shaders decode (`unsignedOctahedralToHemisphereDirection`), and the encoding
+    matches `hemisphereDirectionToUnsignedOctahedral`.
+  - The shaders build the bitangent along +V, which points down the image, so DX maps are used as given and OGL maps get Y flipped.
+    *This is derived from the shader code, not checked visually.*
+- **Image:**
+  - Device-local, with the full mip chain.
+  - 8-bit sRGB formats are stored as UNORM with a mutable-format sRGB view for sampling, so the mip pass can write storage views.
+  - Mips come from the existing `GenerateMipmap` compute pass: a 2x2 average, or a 2x2 max for `HEIGHTMAP` (for the POM raymarch).
+  - A format without storage-image support gets mip 0 only, with a warning.
+- **`UpdateTextureFromMemory`** validates the whole batch before applying anything. On the CS thread it writes each patch
+  into mip 0 and regenerates the whole mip chain once per batch entry.
+- **`CreateTextureFromFile`** uses the loader the 0.6.6 runtime used for material texture paths
+  (`AssetDataManager::findAsset` + `preloadTextureAsset`, colour space AUTO).
+  - A path that is not a regular file fails straight away with `GENERAL_FAILURE`.
+  - A file that exists but does not decode leaves a valid, empty handle and logs an error.
+  - File textures cannot be patched (`INVALID_ARGUMENTS`).
+- **`DestroyTexture`** drops the API's reference. Materials and dome lights created earlier keep their own reference,
+  so a texture still in use is not freed under them.
+- **Shutdown** releases API textures, retained instances and config layers on the CS thread, then synchronises,
+  before the device is released.
+
+### Config layers
+These map onto the runtime's existing option layers (`RtxOptionManager::acquireLayer`/`releaseLayer`, the same
+mechanism the `RtxOptionLayerAction` graph component uses):
+- **Acquire:**
+  - The path must be readable, otherwise `GENERAL_FAILURE`.
+  - Priority is clamped to the dynamic range [100, 10000000] and the threshold to [0,1].
+  - The layer is acquired on the CS thread and the call waits for it, as the 0.16 header specifies.
+  - A new layer starts disabled at strength 0.
+  - The same priority and path returns the cached handle without reading the file again. The runtime holds one
+    reference per distinct layer and counts API references itself.
+- **SetConfigLayerBlending** enables the layer and requests a strength and threshold (clamped). The option system
+  resolves the requests at the end of each frame. Several requests in one frame resolve to the maximum strength and the
+  minimum threshold, which is the header's contract and also the option system's.
+- **Release** at zero references removes the layer, and the affected options re-resolve without it.
+- `GetConfigVariableResolved` shows the blended values.
+
+### Test (`tests/texture_remix.c`, lavapipe; `evidence/phaseC3-textures-layers-lavapipe.log`)
+- Six memory textures, with the caller's buffers overwritten after each call: RGBA8 COLOR, RGBA8 NORMAL_DX,
+  R8 HEIGHTMAP, R8 DATA, RGBA16F, and BGRA8_SRGB at a non-power-of-two size.
+- Six invalid creates.
+- A material, mesh and instance that sample four of the textures, and a dome light on the RGBA16F texture.
+- A batched update (2 entries, 3 patches, one with a padded row pitch) and a normal-map patch. Five rejected batches,
+  with no upload from any of them.
+- A DDS file texture, a missing file, and a patch to the file texture.
+- `DestroyTexture` while the material still uses the texture, followed by frames, a double destroy and an update to the destroyed handle.
+- Config layers. The conf sets a float option to 200 (default 1000) and a bool option to True:
+  - A new layer has no effect.
+  - Strength 1 gives 200/True.
+  - Strength 0.25 with threshold 0.5 gives 800/False.
+  - Two requests in one frame, (0.25, 0.9) and (0.5, 0.1), give 600/True.
+  - The first of two releases keeps the layer; the final release restores the defaults.
+  - Error paths, and a layer left alive at Shutdown.
+- Every check passed: `PASSED (0 failures)`, 30 s on lavapipe. The step 2 scene test still passes.
+
+### Open questions for the GPU run
+- **sRGB:**
+  - Per the 0.16 header comment ("format controls bit interpretation"), the mod's albedo and emissive atlases
+    (RGBA8_UNORM, COLOR) are sampled as linear.
+  - If blocks look washed out compared with Windows, set `REMIX_LINUX_COLOR_UNORM_AS_SRGB=1`. It samples 8-bit UNORM
+    COLOR textures as sRGB without a rebuild. Please report which one matches.
+- **Normal-map orientation:** if bumps look inverted, the DX/OGL Y flip is the place to look.

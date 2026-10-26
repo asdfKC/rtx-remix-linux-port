@@ -1,0 +1,740 @@
+From 6758dd63a0a98720303d8110acc88035e10c37f8 Mon Sep 17 00:00:00 2001
+From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
+Date: Mon, 26 Oct 2026 03:31:00 +0000
+Subject: [PATCH 9/9] remix api: textures from memory and file, config layers
+
+CreateTextureFromMemory converts pixels on the caller thread (BGRA
+swizzle, DX/OGL tangent normals to unsigned octahedral), then creates a
+device-local image on the CS thread, uploads mip 0 and generates the
+chain with the existing GenerateMipmap pass (max filter for height
+maps). UpdateTextureFromMemory validates the whole batch first, applies
+the patches and regenerates mips once per entry. CreateTextureFromFile
+uses the asset loader the 0.6.6 runtime used for material paths.
+DestroyTexture drops the API reference; materials keep theirs.
+
+Config layers map onto RtxOptionManager layers: acquire waits for its
+CS operation, a new layer starts disabled at strength 0, blending
+requests resolve with option updates, and the last release removes the
+layer. Shutdown releases API textures, retained instances and layers
+while the device still exists.
+
+Linux-only debug export remixlinux_GetApiResourceStats. Optional
+REMIX_LINUX_COLOR_UNORM_AS_SRGB=1 samples 8-bit UNORM color textures as
+sRGB, for comparison during GPU bring-up.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Tb41TgDi74v7sgH5LJBZ5A
+Signed-off-by: Claude (for Kush) <kushisthecoolest@gmail.com>
+---
+ src/dxvk/rtx_render/rtx_remix_api.cpp | 589 ++++++++++++++++++++++++--
+ 1 file changed, 549 insertions(+), 40 deletions(-)
+
+diff --git a/src/dxvk/rtx_render/rtx_remix_api.cpp b/src/dxvk/rtx_render/rtx_remix_api.cpp
+index 397be85..f5e2219 100644
+--- a/src/dxvk/rtx_render/rtx_remix_api.cpp
++++ b/src/dxvk/rtx_render/rtx_remix_api.cpp
+@@ -28,6 +28,7 @@
+ #include "rtx_objectpicking.h"
+ #include "rtx_option.h"
+ #include "rtx_option_manager.h"
++#include "rtx_option_layer.h"
+ #include "rtx_globals.h"
+ #include "rtx_options.h"
+ #include "rtx_debug_view.h"
+@@ -39,10 +40,16 @@
+ #include "rtx_remix_pnext.h"
+ 
+ #include "../dxvk_image.h"
++#include "rtx_context.h"
++#include "rtx_mipmap.h"
++#include "rtx/pass/image_utils/generate_mipmap.h"
++
++#include <fstream>
+ 
+ #include "../../util/util_math.h"
+ #include "../../util/util_vector.h"
+ #include "../../util/util_string.h"
++#include "../../util/util_env.h"
+ #include "../../util/util_sentry.h"
+ 
+ #include "../../d3d9/d3d9_swapchain.h"
+@@ -88,17 +95,70 @@ namespace {
+   // Textures created through the API, by handle. Materials and dome lights reference them since API 0.16.
+   // The map is only touched on the CS thread, where material and light commands resolve their handles.
+   struct ApiTextureRegistry {
+-    std::unordered_map<remixapi_TextureHandle, dxvk::TextureRef> textures;
++    struct Entry {
++      dxvk::TextureRef ref;
++      // Memory textures only: the image UpdateTextureFromMemory writes into, and one storage view per mip.
++      dxvk::Rc<dxvk::DxvkImage> image;
++      std::vector<dxvk::Rc<dxvk::DxvkImageView>> mipViews;
++      MipmapMethod mipMethod = MipmapMethod::Simple;
++    };
++    std::unordered_map<remixapi_TextureHandle, Entry> textures;
++    // Diagnostics: completed memory-texture uploads (create or update batch entry), read by remixlinux_GetApiTextureStats.
++    std::atomic<uint64_t> uploads { 0 };
+ 
+     dxvk::TextureRef find(remixapi_TextureHandle handle) const {
+       if (handle == nullptr) {
+         return {};
+       }
+       auto it = textures.find(handle);
+-      return it != textures.end() ? it->second : dxvk::TextureRef {};
++      return it != textures.end() ? it->second.ref : dxvk::TextureRef {};
+     }
+   };
+ 
++  // Caller-side record of live API textures, so invalid handles and out-of-bounds patches fail synchronously.
++  // Guarded by s_mutex.
++  struct ApiTextureDesc {
++    uint32_t width = 0;
++    uint32_t height = 0;
++    remixapi_TextureFormat format = REMIXAPI_TEXTURE_FORMAT_RGBA8_UNORM;
++    remixapi_TexturePurpose purpose = REMIXAPI_TEXTURE_PURPOSE_COLOR;
++    bool fromFile = false;
++  };
++
++  struct ApiTexturesCaller {
++    uintptr_t nextHandle = 1;
++    std::unordered_map<remixapi_TextureHandle, ApiTextureDesc> live;
++  };
++
++  ApiTexturesCaller& apiTexturesCaller() {
++    static ApiTexturesCaller s_textures;
++    return s_textures;
++  }
++
++  // Config layers, see remixapi_AcquireConfigLayer.
++  struct ApiConfigLayer {
++    std::string key;
++    uint32_t refs = 0;
++  };
++
++  // Guarded by s_mutex.
++  struct ApiConfigLayers {
++    uintptr_t nextId = 1;
++    std::unordered_map<std::string, uintptr_t> byKey;
++    std::unordered_map<uintptr_t, ApiConfigLayer> byHandle;
++  };
++
++  ApiConfigLayers& apiConfigLayers() {
++    static ApiConfigLayers s_layers;
++    return s_layers;
++  }
++
++  // CS thread only.
++  std::unordered_map<uintptr_t, dxvk::RtxOptionLayer*>& csConfigLayers() {
++    static std::unordered_map<uintptr_t, dxvk::RtxOptionLayer*> s_layers;
++    return s_layers;
++  }
++
+   ApiTextureRegistry& apiTextures() {
+     static ApiTextureRegistry s_registry;
+     return s_registry;
+@@ -1758,6 +1818,16 @@ namespace {
+ 
+   remixapi_ErrorCode REMIXAPI_CALL remixapi_Shutdown(void) {
+     if (s_dxvkDevice) {
++      // Drop API-owned GPU objects and option layers while the device and its CS thread still exist.
++      s_dxvkDevice->EmitCs([](dxvk::DxvkContext*) {
++        apiTextures().textures.clear();
++        retainedSceneCs().instances.clear();
++        for (auto& [id, layer] : csConfigLayers()) {
++          dxvk::RtxOptionManager::releaseLayer(layer);
++        }
++        csConfigLayers().clear();
++      });
++      s_dxvkDevice->SynchronizeCsThread();
+       dxvk::g_dxvkDeviceNative = nullptr;
+       while (true) {
+         ULONG left = s_dxvkDevice->Release();
+@@ -1777,12 +1847,14 @@ namespace {
+       s_dxvkD3D9 = nullptr;
+     }
+ 
+-    // The CS thread is gone with the device, so the retained scene can be cleared directly.
++    // The CS thread is gone with the device, so the remaining caller-side state can be reset directly.
+     retainedSceneCs().instances.clear();
+     retainedSceneCs().liveCount = 0;
+     {
+       std::lock_guard lock { s_mutex };
+       retainedSceneCaller() = RetainedSceneCaller {};
++      apiTexturesCaller() = ApiTexturesCaller {};
++      apiConfigLayers() = ApiConfigLayers {};
+     }
+ 
+     // Make sure Sentry doesn't keep the process alive when it should be shutting down.
+@@ -1845,24 +1917,382 @@ namespace {
+   // API 0.16 entry points. Parts that are not implemented yet fail through notImplemented() so the caller
+   // sees an error instead of a null function pointer.
+ 
++  // ---- API textures (0.16) ----------------------------------------------------------------------------------
++  // See PORTING_NOTES.md, Phase C step 3. Pixel data is converted to the image layout on the caller thread, so the
++  // caller's buffers are free once a call returns. Upload and mip generation run on the CS thread.
++
++  struct ApiTexelLayout {
++    uint32_t srcBytes = 0;       // bytes per texel in the API format
++    uint32_t dstBytes = 0;       // bytes per texel in the image
++    VkFormat imageFormat = VK_FORMAT_UNDEFINED;   // upload and mip-generation format
++    VkFormat sampledFormat = VK_FORMAT_UNDEFINED; // format materials sample through (sRGB view of an 8-bit image)
++    bool swizzleBgra = false;
++    bool normalToOctahedral = false;
++    bool flipNormalY = false;
++  };
++
++  bool colorUnormAsSrgb() {
++    // Diagnostic switch for the GPU bring-up: sample RGBA8/BGRA8_UNORM color textures as sRGB.
++    static const bool s_enabled = dxvk::env::getEnvVar("REMIX_LINUX_COLOR_UNORM_AS_SRGB") == "1";
++    return s_enabled;
++  }
++
++  std::optional<ApiTexelLayout> toTexelLayout(remixapi_TextureFormat format, remixapi_TexturePurpose purpose) {
++    ApiTexelLayout l;
++    switch (format) {
++    case REMIXAPI_TEXTURE_FORMAT_RGBA8_UNORM:   l = { 4, 4, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM }; break;
++    case REMIXAPI_TEXTURE_FORMAT_RGBA8_SRGB:    l = { 4, 4, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8G8B8A8_SRGB }; break;
++    case REMIXAPI_TEXTURE_FORMAT_BGRA8_UNORM:   l = { 4, 4, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM, true }; break;
++    case REMIXAPI_TEXTURE_FORMAT_BGRA8_SRGB:    l = { 4, 4, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8G8B8A8_SRGB, true }; break;
++    case REMIXAPI_TEXTURE_FORMAT_R8_UNORM:      l = { 1, 1, VK_FORMAT_R8_UNORM, VK_FORMAT_R8_UNORM }; break;
++    case REMIXAPI_TEXTURE_FORMAT_RG8_UNORM:     l = { 2, 2, VK_FORMAT_R8G8_UNORM, VK_FORMAT_R8G8_UNORM }; break;
++    case REMIXAPI_TEXTURE_FORMAT_RGBA16_SFLOAT: l = { 8, 8, VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16G16B16A16_SFLOAT }; break;
++    case REMIXAPI_TEXTURE_FORMAT_RGBA32_SFLOAT: l = { 16, 16, VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_R32G32B32A32_SFLOAT }; break;
++    case REMIXAPI_TEXTURE_FORMAT_R32_SFLOAT:    l = { 4, 4, VK_FORMAT_R32_SFLOAT, VK_FORMAT_R32_SFLOAT }; break;
++    default:
++      return std::nullopt;
++    }
++
++    switch (purpose) {
++    case REMIXAPI_TEXTURE_PURPOSE_COLOR:
++      if (colorUnormAsSrgb() && l.imageFormat == VK_FORMAT_R8G8B8A8_UNORM) {
++        l.sampledFormat = VK_FORMAT_R8G8B8A8_SRGB;
++      }
++      break;
++    case REMIXAPI_TEXTURE_PURPOSE_DATA:
++    case REMIXAPI_TEXTURE_PURPOSE_NORMAL_OTH:
++    case REMIXAPI_TEXTURE_PURPOSE_HEIGHTMAP:
++      break;
++    case REMIXAPI_TEXTURE_PURPOSE_NORMAL_DX:
++    case REMIXAPI_TEXTURE_PURPOSE_NORMAL_OGL:
++      // Tangent-space normals become 2-channel unsigned octahedral, which is what the material shaders decode.
++      if (format != REMIXAPI_TEXTURE_FORMAT_RGBA8_UNORM && format != REMIXAPI_TEXTURE_FORMAT_BGRA8_UNORM &&
++          format != REMIXAPI_TEXTURE_FORMAT_RG8_UNORM) {
++        return std::nullopt;
++      }
++      l.dstBytes = 2;
++      l.imageFormat = VK_FORMAT_R8G8_UNORM;
++      l.sampledFormat = VK_FORMAT_R8G8_UNORM;
++      l.normalToOctahedral = true;
++      // The shaders build the bitangent along +V, which points down the image: the DirectX convention.
++      l.flipNormalY = purpose == REMIXAPI_TEXTURE_PURPOSE_NORMAL_OGL;
++      break;
++    default:
++      return std::nullopt;
++    }
++    return l;
++  }
++
++  MipmapMethod toMipmapMethod(remixapi_TexturePurpose purpose) {
++    // Height maps keep the maximum in each mip for hierarchical POM raymarching.
++    return purpose == REMIXAPI_TEXTURE_PURPOSE_HEIGHTMAP ? MipmapMethod::Maximum : MipmapMethod::Simple;
++  }
++
++  uint8_t unormToByte(float v) {
++    return static_cast<uint8_t>(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f));
++  }
++
++  // Converts w x h texels from the API layout (rows srcPitch bytes apart) into tightly packed image texels.
++  void convertTexels(const ApiTexelLayout& l, const uint8_t* src, uint32_t w, uint32_t h, size_t srcPitch, uint8_t* dst) {
++    for (uint32_t y = 0; y < h; ++y) {
++      const uint8_t* s = src + y * srcPitch;
++      uint8_t* d = dst + size_t(y) * w * l.dstBytes;
++      if (!l.swizzleBgra && !l.normalToOctahedral) {
++        memcpy(d, s, size_t(w) * l.srcBytes);
++        continue;
++      }
++      for (uint32_t x = 0; x < w; ++x, s += l.srcBytes, d += l.dstBytes) {
++        if (!l.normalToOctahedral) {
++          d[0] = s[2]; d[1] = s[1]; d[2] = s[0]; d[3] = s[3];
++          continue;
++        }
++        float nx, ny, nz;
++        if (l.srcBytes == 2) {
++          nx = s[0] / 127.5f - 1.0f;
++          ny = s[1] / 127.5f - 1.0f;
++          nz = std::sqrt(std::max(0.0f, 1.0f - nx * nx - ny * ny));
++        } else {
++          const uint8_t r = l.swizzleBgra ? s[2] : s[0];
++          const uint8_t b = l.swizzleBgra ? s[0] : s[2];
++          nx = r / 127.5f - 1.0f;
++          ny = s[1] / 127.5f - 1.0f;
++          nz = b / 127.5f - 1.0f;
++        }
++        if (l.flipNormalY) {
++          ny = -ny;
++        }
++        nz = std::max(nz, 0.0f);
++        // Same encoding as hemisphereDirectionToUnsignedOctahedral() in the shaders.
++        const float sum = std::abs(nx) + std::abs(ny) + nz;
++        float px = 0.0f, py = 0.0f;
++        if (sum > 1e-6f) {
++          px = nx / sum;
++          py = ny / sum;
++        }
++        d[0] = unormToByte((px + py) * 0.5f + 0.5f);
++        d[1] = unormToByte((px - py) * 0.5f + 0.5f);
++      }
++    }
++  }
++
++  uint32_t fullMipCount(uint32_t w, uint32_t h) {
++    uint32_t levels = 1;
++    for (uint32_t size = std::max(w, h); size > 1; size >>= 1) {
++      ++levels;
++    }
++    return levels;
++  }
++
++  // CS thread. Regenerates mips 1..n from mip 0 and makes the image visible to the shaders that sample it.
++  void finishApiTextureUploadCs(dxvk::RtxContext* ctx, ApiTextureRegistry::Entry& entry) {
++    using namespace dxvk;
++    ctx->emitMemoryBarrier(0,
++      VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
++      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
++    if (entry.mipViews.size() > 1) {
++      RtxMipmap::Resource mipmap;
++      mipmap.image = entry.image;
++      mipmap.view = entry.mipViews[0];
++      mipmap.views = entry.mipViews;
++      RtxMipmap::updateMipmap(Rc<RtxContext>(ctx), mipmap, entry.mipMethod);
++      ctx->setPushConstantBank(DxvkPushConstantBank::D3D9);
++    }
++    ctx->emitMemoryBarrier(0,
++      VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
++      VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT,
++      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
++      VK_ACCESS_SHADER_READ_BIT);
++    apiTextures().uploads++;
++  }
++
++  // CS thread.
++  void createApiTextureCs(dxvk::RtxContext* ctx, remixapi_TextureHandle handle, uint64_t hash, const ApiTexelLayout& l,
++                          MipmapMethod mipMethod, uint32_t w, uint32_t h, const std::vector<uint8_t>& texels) {
++    using namespace dxvk;
++    Rc<DxvkDevice> device = ctx->getDevice();
++
++    // Mips are generated by a compute pass that writes storage views. Without storage support for the format the
++    // texture keeps mip 0 only.
++    const VkFormatProperties props = device->adapter()->formatProperties(l.imageFormat);
++    const bool canStore = (props.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) != 0;
++    const uint32_t mipLevels = canStore ? fullMipCount(w, h) : 1;
++    if (!canStore) {
++      ONCE(Logger::warn(str::format("[RemixAPI] Texture format ", l.imageFormat, " has no storage support; API textures of this format get no mips.")));
++    }
++
++    const VkFormat viewFormats[2] = { l.imageFormat, l.sampledFormat };
++    const bool mutableFormat = l.sampledFormat != l.imageFormat;
++
++    DxvkImageCreateInfo desc;
++    desc.type = VK_IMAGE_TYPE_2D;
++    desc.format = l.imageFormat;
++    desc.flags = mutableFormat ? VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT : 0;
++    desc.sampleCount = VK_SAMPLE_COUNT_1_BIT;
++    desc.extent = VkExtent3D { w, h, 1 };
++    desc.numLayers = 1;
++    desc.mipLevels = mipLevels;
++    desc.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
++                 (canStore ? VK_IMAGE_USAGE_STORAGE_BIT : 0);
++    desc.stages = VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
++                  VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
++    desc.access = VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_SHADER_READ_BIT |
++                  VK_ACCESS_SHADER_WRITE_BIT;
++    desc.tiling = VK_IMAGE_TILING_OPTIMAL;
++    desc.layout = VK_IMAGE_LAYOUT_GENERAL;
++    if (mutableFormat) {
++      desc.viewFormatCount = 2;
++      desc.viewFormats = viewFormats;
++    }
++
++    ApiTextureRegistry::Entry entry;
++    entry.image = device->createImage(desc, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, DxvkMemoryStats::Category::RTXMaterialTexture,
++                                      "remix api texture");
++    entry.image->setHash(hash != 0 ? hash : XXH64(&handle, sizeof(handle), 0));
++    entry.mipMethod = mipMethod;
++
++    DxvkImageViewCreateInfo viewInfo;
++    viewInfo.type = VK_IMAGE_VIEW_TYPE_2D;
++    viewInfo.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
++    viewInfo.minLayer = 0;
++    viewInfo.numLayers = 1;
++    if (mipLevels > 1) {
++      viewInfo.format = l.imageFormat;
++      viewInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
++      viewInfo.numLevels = 1;
++      for (uint32_t i = 0; i < mipLevels; ++i) {
++        viewInfo.minLevel = i;
++        entry.mipViews.push_back(device->createImageView(entry.image, viewInfo));
++      }
++    }
++    viewInfo.format = l.sampledFormat;
++    viewInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
++    viewInfo.minLevel = 0;
++    viewInfo.numLevels = mipLevels;
++    entry.ref = TextureRef { device->createImageView(entry.image, viewInfo) };
++
++    ctx->updateImage(entry.image, VkImageSubresourceLayers { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
++                     VkOffset3D { 0, 0, 0 }, desc.extent, texels.data(), size_t(w) * l.dstBytes, texels.size());
++    finishApiTextureUploadCs(ctx, entry);
++
++    apiTextures().textures.insert_or_assign(handle, std::move(entry));
++  }
++
++  struct ApiTexturePatchCs {
++    uint32_t x, y, w, h;
++    std::vector<uint8_t> texels; // tightly packed, image layout
++  };
++
+   remixapi_ErrorCode REMIXAPI_CALL remixapi_CreateTextureFromMemory(
+     const remixapi_TextureFromMemoryInfo* info,
+     remixapi_TextureHandle* out_handle) {
+-    return notImplemented("CreateTextureFromMemory");
++    if (!info || !out_handle || info->sType != REMIXAPI_STRUCT_TYPE_TEXTURE_FROM_MEMORY_INFO || !info->pixelData ||
++        info->width == 0 || info->height == 0) {
++      return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
++    }
++    dxvk::D3D9DeviceEx* remixDevice = tryAsDxvk();
++    if (!remixDevice) {
++      return REMIXAPI_ERROR_CODE_REMIX_DEVICE_WAS_NOT_REGISTERED;
++    }
++    const auto layout = toTexelLayout(info->format, info->purpose);
++    const uint32_t maxDim = remixDevice->GetDXVKDevice()->properties().core.properties.limits.maxImageDimension2D;
++    if (!layout || info->width > maxDim || info->height > maxDim) {
++      return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
++    }
++
++    std::vector<uint8_t> texels(size_t(info->width) * info->height * layout->dstBytes);
++    convertTexels(*layout, info->pixelData, info->width, info->height, size_t(info->width) * layout->srcBytes, texels.data());
++
++    std::lock_guard lock { s_mutex };
++    auto& caller = apiTexturesCaller();
++    const auto handle = reinterpret_cast<remixapi_TextureHandle>(caller.nextHandle++);
++    caller.live.emplace(handle, ApiTextureDesc { info->width, info->height, info->format, info->purpose, false });
++
++    remixDevice->EmitCs([cHandle = handle, cHash = info->hash, cLayout = *layout, cMipMethod = toMipmapMethod(info->purpose),
++                         cWidth = info->width, cHeight = info->height, cTexels = std::move(texels)](dxvk::DxvkContext* ctx) {
++      createApiTextureCs(static_cast<dxvk::RtxContext*>(ctx), cHandle, cHash, cLayout, cMipMethod, cWidth, cHeight, cTexels);
++    });
++    *out_handle = handle;
++    return REMIXAPI_ERROR_CODE_SUCCESS;
+   }
+ 
+   remixapi_ErrorCode REMIXAPI_CALL remixapi_CreateTextureFromFile(
+     remixapi_Path filePath,
+     remixapi_TextureHandle* out_handle) {
+-    return notImplemented("CreateTextureFromFile");
++    if (!filePath || filePath[0] == L'\0' || !out_handle) {
++      return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
++    }
++    dxvk::D3D9DeviceEx* remixDevice = tryAsDxvk();
++    if (!remixDevice) {
++      return REMIXAPI_ERROR_CODE_REMIX_DEVICE_WAS_NOT_REGISTERED;
++    }
++    const std::filesystem::path path = convert::topath(filePath);
++    std::error_code ec;
++    if (!std::filesystem::is_regular_file(path, ec)) {
++      dxvk::Logger::err(dxvk::str::format("[RemixAPI] CreateTextureFromFile: not a readable file: ", path.string()));
++      return REMIXAPI_ERROR_CODE_GENERAL_FAILURE;
++    }
++
++    std::lock_guard lock { s_mutex };
++    auto& caller = apiTexturesCaller();
++    const auto handle = reinterpret_cast<remixapi_TextureHandle>(caller.nextHandle++);
++    caller.live.emplace(handle, ApiTextureDesc { 0, 0, REMIXAPI_TEXTURE_FORMAT_RGBA8_UNORM, REMIXAPI_TEXTURE_PURPOSE_COLOR, true });
++
++    // Same loading path the 0.6.6 runtime used for material texture paths. A file that fails to decode leaves the
++    // handle valid but empty (untextured), with an error in the log.
++    remixDevice->EmitCs([cHandle = handle, cPath = path.string()](dxvk::DxvkContext* ctx) {
++      auto assetData = dxvk::AssetDataManager::get().findAsset(cPath);
++      ApiTextureRegistry::Entry entry;
++      if (assetData != nullptr) {
++        entry.ref = dxvk::TextureRef { ctx->getCommonObjects()->getTextureManager()
++          .preloadTextureAsset(assetData, dxvk::ColorSpace::AUTO, false) };
++      } else {
++        dxvk::Logger::err(dxvk::str::format("[RemixAPI] CreateTextureFromFile: could not load ", cPath));
++      }
++      apiTextures().textures.insert_or_assign(cHandle, std::move(entry));
++    });
++    *out_handle = handle;
++    return REMIXAPI_ERROR_CODE_SUCCESS;
+   }
+ 
+   remixapi_ErrorCode REMIXAPI_CALL remixapi_DestroyTexture(remixapi_TextureHandle handle) {
+-    return notImplemented("DestroyTexture");
++    dxvk::D3D9DeviceEx* remixDevice = tryAsDxvk();
++    if (!remixDevice) {
++      return REMIXAPI_ERROR_CODE_REMIX_DEVICE_WAS_NOT_REGISTERED;
++    }
++    std::lock_guard lock { s_mutex };
++    if (!handle || apiTexturesCaller().live.erase(handle) == 0) {
++      return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
++    }
++    // Materials and lights created earlier hold their own reference, so the image lives until they release it.
++    remixDevice->EmitCs([cHandle = handle](dxvk::DxvkContext*) {
++      apiTextures().textures.erase(cHandle);
++    });
++    return REMIXAPI_ERROR_CODE_SUCCESS;
+   }
+ 
+   remixapi_ErrorCode REMIXAPI_CALL remixapi_UpdateTextureFromMemory(const remixapi_TexturePatchInfo* info) {
+-    return notImplemented("UpdateTextureFromMemory");
++    if (!info || info->sType != REMIXAPI_STRUCT_TYPE_TEXTURE_PATCH_INFO || info->entryCount == 0 || !info->entries) {
++      return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
++    }
++    dxvk::D3D9DeviceEx* remixDevice = tryAsDxvk();
++    if (!remixDevice) {
++      return REMIXAPI_ERROR_CODE_REMIX_DEVICE_WAS_NOT_REGISTERED;
++    }
++
++    std::lock_guard lock { s_mutex };
++    const auto& live = apiTexturesCaller().live;
++
++    // Validate the whole batch first, so a bad entry rejects it before anything is applied.
++    for (uint32_t e = 0; e < info->entryCount; ++e) {
++      const remixapi_TextureBatchEntry& entry = info->entries[e];
++      auto it = live.find(entry.handle);
++      if (it == live.end() || it->second.fromFile || entry.patchCount == 0 || !entry.patches) {
++        return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
++      }
++      const ApiTextureDesc& desc = it->second;
++      const auto layout = toTexelLayout(desc.format, desc.purpose);
++      for (uint32_t p = 0; p < entry.patchCount; ++p) {
++        const remixapi_TexturePatch& patch = entry.patches[p];
++        // No conversion between API formats: a patch must use its texture's format.
++        if (patch.format != desc.format || !patch.pixelData || patch.width == 0 || patch.height == 0 ||
++            uint64_t(patch.dstX) + patch.width > desc.width || uint64_t(patch.dstY) + patch.height > desc.height ||
++            (patch.rowPitch != 0 && patch.rowPitch < uint64_t(patch.width) * layout->srcBytes)) {
++          return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
++        }
++      }
++    }
++
++    for (uint32_t e = 0; e < info->entryCount; ++e) {
++      const remixapi_TextureBatchEntry& entry = info->entries[e];
++      const ApiTextureDesc& desc = live.at(entry.handle);
++      const auto layout = toTexelLayout(desc.format, desc.purpose);
++
++      std::vector<ApiTexturePatchCs> patches(entry.patchCount);
++      for (uint32_t p = 0; p < entry.patchCount; ++p) {
++        const remixapi_TexturePatch& src = entry.patches[p];
++        ApiTexturePatchCs& dst = patches[p];
++        dst = { src.dstX, src.dstY, src.width, src.height, {} };
++        dst.texels.resize(size_t(src.width) * src.height * layout->dstBytes);
++        const size_t pitch = src.rowPitch != 0 ? src.rowPitch : size_t(src.width) * layout->srcBytes;
++        convertTexels(*layout, src.pixelData, src.width, src.height, pitch, dst.texels.data());
++      }
++
++      remixDevice->EmitCs([cHandle = entry.handle, cDstBytes = layout->dstBytes, cPatches = std::move(patches)](dxvk::DxvkContext* dxvkCtx) {
++        auto it = apiTextures().textures.find(cHandle);
++        if (it == apiTextures().textures.end() || it->second.image == nullptr) {
++          return;
++        }
++        auto* ctx = static_cast<dxvk::RtxContext*>(dxvkCtx);
++        for (const ApiTexturePatchCs& patch : cPatches) {
++          ctx->updateImage(it->second.image, VkImageSubresourceLayers { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
++                           VkOffset3D { int32_t(patch.x), int32_t(patch.y), 0 }, VkExtent3D { patch.w, patch.h, 1 },
++                           patch.texels.data(), size_t(patch.w) * cDstBytes, patch.texels.size());
++        }
++        // The whole chain is regenerated, not only the patched region (see KNOWN_GAPS.md).
++        finishApiTextureUploadCs(ctx, it->second);
++      });
++    }
++    return REMIXAPI_ERROR_CODE_SUCCESS;
+   }
+ 
+   remixapi_ErrorCode REMIXAPI_CALL remixapi_dxvk_GetInteropInfo(remixapi_dxvk_InteropInfo* out_info) {
+@@ -1999,40 +2429,60 @@ namespace {
+     return REMIXAPI_ERROR_CODE_SUCCESS;
+   }
+ 
+-  // Config layers are accepted and ignored: every acquire returns a distinct handle, and blending and release succeed.
+-  // Option values from layer conf files therefore do not apply.
+-  struct ApiConfigLayers {
+-    dxvk::mutex mutex;
+-    uintptr_t nextId = 1;
+-    std::unordered_map<std::string, std::pair<uintptr_t, uint32_t>> byKey;
+-  };
+-
+-  ApiConfigLayers& apiConfigLayers() {
+-    static ApiConfigLayers s_layers;
+-    return s_layers;
+-  }
+-
++  // Config layers (0.16) over the runtime's option layers (RtxOptionManager). Each distinct (priority, path) holds one
++  // manager reference; the API reference count is kept here. See PORTING_NOTES.md, Phase C step 3.
+   remixapi_ErrorCode REMIXAPI_CALL remixapi_AcquireConfigLayer(
+     const char* path,
+     float priority,
+     float blendThreshold,
+     remixapi_ConfigLayerHandle* out_handle) {
+-    if (!path || !out_handle || !std::isfinite(priority) || !std::isfinite(blendThreshold)) {
++    if (!path || path[0] == '\0' || !out_handle || !std::isfinite(priority) || !std::isfinite(blendThreshold)) {
+       return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
+     }
+-    if (!tryAsDxvk()) {
++    dxvk::D3D9DeviceEx* remixDevice = tryAsDxvk();
++    if (!remixDevice) {
+       return REMIXAPI_ERROR_CODE_REMIX_DEVICE_WAS_NOT_REGISTERED;
+     }
++    const float clampedPriority = std::clamp(priority,
++      float(dxvk::kMinDynamicRtxOptionLayerPriority), float(dxvk::kMaxDynamicRtxOptionLayerPriority));
++    const uint32_t layerPriority = dxvk::clampComponentLayerPriority(clampedPriority);
++    const float threshold = std::clamp(blendThreshold, 0.0f, 1.0f);
++    const std::string key = dxvk::str::format(layerPriority, "|", path);
++
++    std::lock_guard lock { s_mutex };
+     auto& layers = apiConfigLayers();
+-    std::lock_guard lock { layers.mutex };
+-    const std::string key = dxvk::str::format(priority, "|", path);
+-    auto it = layers.byKey.find(key);
+-    if (it == layers.byKey.end()) {
+-      it = layers.byKey.emplace(key, std::make_pair(layers.nextId++, 0u)).first;
+-      dxvk::Logger::warn(dxvk::str::format("[RemixAPI] Config layers are not implemented by this runtime. Ignoring: ", path));
+-    }
+-    it->second.second++;
+-    *out_handle = reinterpret_cast<remixapi_ConfigLayerHandle>(it->second.first);
++    if (auto it = layers.byKey.find(key); it != layers.byKey.end()) {
++      // Cached: no file read.
++      layers.byHandle.at(it->second).refs++;
++      *out_handle = reinterpret_cast<remixapi_ConfigLayerHandle>(it->second);
++      return REMIXAPI_ERROR_CODE_SUCCESS;
++    }
++    if (!std::ifstream(path).good()) {
++      dxvk::Logger::err(dxvk::str::format("[RemixAPI] AcquireConfigLayer: cannot read ", path));
++      return REMIXAPI_ERROR_CODE_GENERAL_FAILURE;
++    }
++
++    const uintptr_t id = layers.nextId++;
++    auto acquired = std::make_shared<std::atomic<bool>>(false);
++    remixDevice->EmitCs([id, cPath = std::string(path), layerPriority, threshold, acquired](dxvk::DxvkContext*) {
++      dxvk::RtxOptionLayer* layer = dxvk::RtxOptionManager::acquireLayer(cPath, { layerPriority, cPath }, 0.0f, threshold);
++      if (layer == nullptr) {
++        return;
++      }
++      // A new layer starts disabled at strength 0; SetConfigLayerBlending enables it.
++      layer->requestEnabled(false);
++      csConfigLayers()[id] = layer;
++      acquired->store(true);
++    });
++    // AcquireConfigLayer waits for its CS operation (0.16 contract), so the conf has been parsed when it returns.
++    remixDevice->SynchronizeCsThread();
++    if (!acquired->load()) {
++      dxvk::Logger::err(dxvk::str::format("[RemixAPI] AcquireConfigLayer: the option system rejected ", path));
++      return REMIXAPI_ERROR_CODE_GENERAL_FAILURE;
++    }
++    layers.byKey.emplace(key, id);
++    layers.byHandle.emplace(id, ApiConfigLayer { key, 1 });
++    *out_handle = reinterpret_cast<remixapi_ConfigLayerHandle>(id);
+     return REMIXAPI_ERROR_CODE_SUCCESS;
+   }
+ 
+@@ -2043,6 +2493,27 @@ namespace {
+     if (!handle || !std::isfinite(strength) || !std::isfinite(blendThreshold)) {
+       return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
+     }
++    dxvk::D3D9DeviceEx* remixDevice = tryAsDxvk();
++    if (!remixDevice) {
++      return REMIXAPI_ERROR_CODE_REMIX_DEVICE_WAS_NOT_REGISTERED;
++    }
++    const uintptr_t id = reinterpret_cast<uintptr_t>(handle);
++    std::lock_guard lock { s_mutex };
++    if (apiConfigLayers().byHandle.count(id) == 0) {
++      return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
++    }
++    // Requests are resolved by the option system once per frame. Several requests in one frame resolve to the
++    // maximum strength and the minimum threshold, as the 0.16 header specifies.
++    remixDevice->EmitCs([id, cStrength = std::clamp(strength, 0.0f, 1.0f),
++                         cThreshold = std::clamp(blendThreshold, 0.0f, 1.0f)](dxvk::DxvkContext*) {
++      auto it = csConfigLayers().find(id);
++      if (it == csConfigLayers().end()) {
++        return;
++      }
++      it->second->requestEnabled(true);
++      it->second->requestBlendStrength(cStrength);
++      it->second->requestBlendThreshold(cThreshold);
++    });
+     return REMIXAPI_ERROR_CODE_SUCCESS;
+   }
+ 
+@@ -2050,17 +2521,31 @@ namespace {
+     if (!handle) {
+       return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
+     }
++    dxvk::D3D9DeviceEx* remixDevice = tryAsDxvk();
++    if (!remixDevice) {
++      return REMIXAPI_ERROR_CODE_REMIX_DEVICE_WAS_NOT_REGISTERED;
++    }
++    const uintptr_t id = reinterpret_cast<uintptr_t>(handle);
++    std::lock_guard lock { s_mutex };
+     auto& layers = apiConfigLayers();
+-    std::lock_guard lock { layers.mutex };
+-    for (auto it = layers.byKey.begin(); it != layers.byKey.end(); ++it) {
+-      if (reinterpret_cast<remixapi_ConfigLayerHandle>(it->second.first) == handle) {
+-        if (--it->second.second == 0) {
+-          layers.byKey.erase(it);
+-        }
+-        return REMIXAPI_ERROR_CODE_SUCCESS;
+-      }
++    auto it = layers.byHandle.find(id);
++    if (it == layers.byHandle.end()) {
++      return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
+     }
+-    return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
++    if (--it->second.refs > 0) {
++      return REMIXAPI_ERROR_CODE_SUCCESS;
++    }
++    layers.byKey.erase(it->second.key);
++    layers.byHandle.erase(it);
++    remixDevice->EmitCs([id](dxvk::DxvkContext*) {
++      auto it = csConfigLayers().find(id);
++      if (it == csConfigLayers().end()) {
++        return;
++      }
++      dxvk::RtxOptionManager::releaseLayer(it->second);
++      csConfigLayers().erase(it);
++    });
++    return REMIXAPI_ERROR_CODE_SUCCESS;
+   }
+ 
+   // Reads a registered option's resolved value. Keys in dynamic option namespaces are not supported yet.
+@@ -2194,5 +2679,29 @@ extern "C" REMIXAPI void REMIXAPI_CALL remixlinux_GetRetainedSceneStats(uint64_t
+     *outReplayedDraws = retainedSceneCs().replayedDraws;
+   }
+ }
++
++// Diagnostics for tests: waits for the CS thread, then reports the API textures it holds, how many of them resolve to
++// a texture, the completed memory-texture uploads, and the live config layers. Not for use while other threads call
++// the API.
++extern "C" REMIXAPI void REMIXAPI_CALL remixlinux_GetApiResourceStats(uint64_t* outTextures, uint64_t* outResolvedTextures,
++                                                                      uint64_t* outUploads, uint64_t* outConfigLayers) {
++  uint64_t textures = 0, resolved = 0, uploads = 0, layers = 0;
++  {
++    std::lock_guard lock { s_mutex };
++    if (s_dxvkDevice) {
++      s_dxvkDevice->SynchronizeCsThread();
++    }
++    textures = apiTextures().textures.size();
++    for (const auto& [handle, entry] : apiTextures().textures) {
++      resolved += entry.ref.isValid() ? 1 : 0;
++    }
++    uploads = apiTextures().uploads;
++    layers = csConfigLayers().size();
++  }
++  if (outTextures) *outTextures = textures;
++  if (outResolvedTextures) *outResolvedTextures = resolved;
++  if (outUploads) *outUploads = uploads;
++  if (outConfigLayers) *outConfigLayers = layers;
++}
+ #endif
+ 
+-- 
+2.43.0
+

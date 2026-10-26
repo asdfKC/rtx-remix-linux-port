@@ -1,0 +1,86 @@
+InitializeLibrary                                    -> 0x0
+AcquireConfigLayer before Startup                    -> 0x7
+Startup                                              -> 0x0
+CreateTextureFromMemory RGBA8 COLOR 64x64            -> 0x0
+CreateTextureFromMemory RGBA8 NORMAL_DX              -> 0x0
+CreateTextureFromMemory R8 HEIGHTMAP                 -> 0x0
+CreateTextureFromMemory R8 DATA                      -> 0x0
+CreateTextureFromMemory RGBA16F 128x64 (sky)         -> 0x0
+CreateTextureFromMemory BGRA8_SRGB 30x17             -> 0x0
+texture handles are distinct and non-null               ok
+CreateTextureFromMemory (null info)                  -> 0x3
+CreateTextureFromMemory (width 0)                    -> 0x3
+CreateTextureFromMemory (null pixels)                -> 0x3
+CreateTextureFromMemory (unknown format)             -> 0x3
+CreateTextureFromMemory (unknown purpose)            -> 0x3
+CreateTextureFromMemory (NORMAL_DX from R8)          -> 0x3
+stats after creating 6 textures                         textures=6 resolved=6 uploads=6 layers=0
+6 textures on the CS side, 6 uploads                    ok
+CreateMaterial (albedo, normal, height, roughness)   -> 0x0
+CreateMesh                                           -> 0x0
+SceneInstanceAdd                                     -> 0x0
+CreateLight (dome, sky texture)                      -> 0x0
+3 frames with textured instance and dome light          done
+UpdateTextureFromMemory (2 entries, 3 patches)       -> 0x0
+stats after the batch update                            textures=6 resolved=6 uploads=8 layers=0
+batch update made 2 uploads (one per entry)             ok
+UpdateTextureFromMemory (normal map, rowPitch 0)     -> 0x0
+UpdateTextureFromMemory (2nd entry out of bounds)    -> 0x3
+UpdateTextureFromMemory (format mismatch)            -> 0x3
+UpdateTextureFromMemory (rowPitch too small)         -> 0x3
+UpdateTextureFromMemory (unknown handle)             -> 0x3
+UpdateTextureFromMemory (no entries)                 -> 0x3
+stats after rejected batches                            textures=6 resolved=6 uploads=9 layers=0
+rejected batches made no uploads (only the normal patch)    ok
+wrote test DDS                                          ok
+CreateTextureFromFile (32x32 BGRA DDS)               -> 0x0
+CreateTextureFromFile (missing file)                 -> 0x1
+CreateTextureFromFile (null path)                    -> 0x3
+UpdateTextureFromMemory (file texture)               -> 0x3
+stats after file texture                                textures=7 resolved=7 uploads=9 layers=0
+file texture resolved (7 textures, 7 resolved)          ok
+DestroyTexture (albedo, still used by material)      -> 0x0
+2 frames after destroying a used texture                done
+DestroyTexture (again)                               -> 0x3
+DestroyTexture (null)                                -> 0x3
+UpdateTextureFromMemory (destroyed handle)           -> 0x3
+DestroyTexture (file texture)                        -> 0x0
+stats after destroying 2 textures                       textures=5 resolved=5 uploads=9 layers=0
+5 textures left                                         ok
+defaults                                                rtx.secondarySpecularFireflyFilteringThreshold=1000 rtx.enablePortalFadeInEffect=0
+defaults read back (1000, False)                        ok
+AcquireConfigLayer                                   -> 0x0
+AcquireConfigLayer (same path and priority)          -> 0x0
+same handle for the cached layer                        ok
+AcquireConfigLayer (missing file)                    -> 0x1
+AcquireConfigLayer (NaN priority)                    -> 0x3
+SetConfigLayerBlending (unknown handle)              -> 0x3
+new layer (disabled, strength 0)                        float=1000 bool=0
+new layer has no effect                                 ok
+SetConfigLayerBlending (strength 1)                  -> 0x0
+strength 1                                              float=200 bool=1
+strength 1 applies the layer (200, True)                ok
+SetConfigLayerBlending (strength 0.25)               -> 0x0
+strength 0.25, threshold 0.5                            float=800 bool=0
+float blends to 800, bool below threshold stays False    ok
+SetConfigLayerBlending (0.25, 0.9)                   -> 0x0
+SetConfigLayerBlending (0.5, 0.1) same frame         -> 0x0
+two requests -> strength 0.5, threshold 0.1             float=600 bool=1
+float 600, bool True                                    ok
+stats with one layer acquired twice                     textures=5 resolved=5 uploads=9 layers=1
+one runtime layer                                       ok
+ReleaseConfigLayer (1 of 2)                          -> 0x0
+layer still applied after first release                 ok
+ReleaseConfigLayer (2 of 2)                          -> 0x0
+after final release                                     float=1000 bool=0
+defaults restored (1000, False)                         ok
+ReleaseConfigLayer (already released)                -> 0x3
+stats after release                                     textures=5 resolved=5 uploads=9 layers=0
+no runtime layers                                       ok
+AcquireConfigLayer (kept until Shutdown)             -> 0x0
+Shutdown                                             -> 0x0
+PASSED (0 failures)
+
+real	0m30.295s
+user	0m52.599s
+sys	0m3.612s
