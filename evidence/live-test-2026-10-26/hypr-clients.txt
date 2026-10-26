@@ -1,0 +1,331 @@
+Window 55bbbe9ba7f0 -> ✳ Blank pre-check false positive fix:
+	mapped: 1
+	hidden: 0
+	visible: 1
+	acceptsInput: 1
+	at: 21,67
+	size: 2518,1352
+	workspace: 2 (2)
+	floating: 0
+	monitor: 1
+	class: kitty
+	title: ✳ Blank pre-check false positive fix
+	initialClass: kitty
+	initialTitle: kitty
+	pid: 8284
+	xwayland: 0
+	pinned: 0
+	pinFullscreened: 0
+	fullscreen: 0
+	fullscreenClient: 0
+	fullscreenHandler: default
+	allowedOverFullscreen: 1
+	grouped: 0
+	tags: 
+	swallowing: 0
+	focusHistoryID: 9
+	inhibitingIdle: 0
+	xdgTag: 
+	xdgDescription: 
+	contentType: none
+	tearingHint: 0
+	stableID: 1800000f
+
+Window 55bbbedfccb0 -> 194432821 [Codespaces: scaling happiness] - Visual Studio Code:
+	mapped: 1
+	hidden: 0
+	visible: 1
+	acceptsInput: 1
+	at: 2420,67
+	size: 119,1352
+	workspace: 1 (1)
+	floating: 0
+	monitor: 1
+	class: code
+	title: 194432821 [Codespaces: scaling happiness] - Visual Studio Code
+	initialClass: code
+	initialTitle: Visual Studio Code
+	pid: 40701
+	xwayland: 0
+	pinned: 0
+	pinFullscreened: 0
+	fullscreen: 0
+	fullscreenClient: 0
+	fullscreenHandler: default
+	allowedOverFullscreen: 1
+	grouped: 0
+	tags: 
+	swallowing: 0
+	focusHistoryID: 3
+	inhibitingIdle: 0
+	xdgTag: 
+	xdgDescription: 
+	contentType: none
+	tearingHint: 0
+	stableID: 18000028
+
+Window 55bbbed03ac0 -> Mission Center:
+	mapped: 1
+	hidden: 0
+	visible: 1
+	acceptsInput: 1
+	at: 4372,21
+	size: 87,1038
+	workspace: 8 (8)
+	floating: 0
+	monitor: 0
+	class: io.missioncenter.MissionCenter
+	title: Mission Center
+	initialClass: io.missioncenter.MissionCenter
+	initialTitle: Mission Center
+	pid: 7262
+	xwayland: 0
+	pinned: 0
+	pinFullscreened: 0
+	fullscreen: 0
+	fullscreenClient: 0
+	fullscreenHandler: default
+	allowedOverFullscreen: 1
+	grouped: 0
+	tags: 
+	swallowing: 0
+	focusHistoryID: 7
+	inhibitingIdle: 0
+	xdgTag: 
+	xdgDescription: 
+	contentType: none
+	tearingHint: 0
+	stableID: 1800000e
+
+Window 55bbbebf1900 -> (101) Discord | Linux and Microslop Players:
+	mapped: 1
+	hidden: 0
+	visible: 1
+	acceptsInput: 1
+	at: 2581,21
+	size: 1878,1038
+	workspace: 10 (10)
+	floating: 0
+	monitor: 0
+	class: vesktop
+	title: (101) Discord | Linux and Microslop Players
+	initialClass: vesktop
+	initialTitle: Discord
+	pid: 3262
+	xwayland: 0
+	pinned: 0
+	pinFullscreened: 0
+	fullscreen: 0
+	fullscreenClient: 0
+	fullscreenHandler: default
+	allowedOverFullscreen: 1
+	grouped: 0
+	tags: 
+	swallowing: 0
+	focusHistoryID: 8
+	inhibitingIdle: 1
+	xdgTag: 
+	xdgDescription: 
+	contentType: none
+	tearingHint: 0
+	stableID: 18000005
+
+Window 55bbbebf8eb0 -> Claude:
+	mapped: 1
+	hidden: 0
+	visible: 1
+	acceptsInput: 1
+	at: 2581,21
+	size: 1779,1038
+	workspace: 8 (8)
+	floating: 0
+	monitor: 0
+	class: com.anthropic.Claude
+	title: Claude
+	initialClass: com.anthropic.Claude
+	initialTitle: Claude
+	pid: 9245
+	xwayland: 0
+	pinned: 0
+	pinFullscreened: 0
+	fullscreen: 0
+	fullscreenClient: 0
+	fullscreenHandler: default
+	allowedOverFullscreen: 1
+	grouped: 0
+	tags: 
+	swallowing: 0
+	focusHistoryID: 2
+	inhibitingIdle: 0
+	xdgTag: 
+	xdgDescription: 
+	contentType: none
+	tearingHint: 0
+	stableID: 180000ad
+
+Window 55bbbf41c460 -> ✳ FD interop for Linux RTX Remix runtime on RTX 5070:
+	mapped: 1
+	hidden: 0
+	visible: 1
+	acceptsInput: 1
+	at: 1223,67
+	size: 1185,1352
+	workspace: 1 (1)
+	floating: 0
+	monitor: 1
+	class: kitty
+	title: ✳ FD interop for Linux RTX Remix runtime on RTX 5070
+	initialClass: kitty
+	initialTitle: kitty
+	pid: 1406591
+	xwayland: 0
+	pinned: 0
+	pinFullscreened: 0
+	fullscreen: 0
+	fullscreenClient: 0
+	fullscreenHandler: default
+	allowedOverFullscreen: 1
+	grouped: 0
+	tags: 
+	swallowing: 0
+	focusHistoryID: 4
+	inhibitingIdle: 0
+	xdgTag: 
+	xdgDescription: 
+	contentType: none
+	tearingHint: 0
+	stableID: 180000ce
+
+Window 55bbbed23660 -> ! iamalive (DM) - Hack Club - 10 new items - Slack:
+	mapped: 1
+	hidden: 0
+	visible: 1
+	acceptsInput: 1
+	at: 21,67
+	size: 2518,1352
+	workspace: 3 (3)
+	floating: 0
+	monitor: 1
+	class: slack
+	title: ! iamalive (DM) - Hack Club - 10 new items - Slack
+	initialClass: slack
+	initialTitle: Slack
+	pid: 3231
+	xwayland: 0
+	pinned: 0
+	pinFullscreened: 0
+	fullscreen: 0
+	fullscreenClient: 0
+	fullscreenHandler: default
+	allowedOverFullscreen: 1
+	grouped: 0
+	tags: 
+	swallowing: 0
+	focusHistoryID: 6
+	inhibitingIdle: 0
+	xdgTag: 
+	xdgDescription: 
+	contentType: none
+	tearingHint: 0
+	stableID: 1800000b
+
+Window 55bbbed30b70 -> RTX Remix on Arch - Claude — Mozilla Firefox:
+	mapped: 1
+	hidden: 0
+	visible: 1
+	acceptsInput: 1
+	at: 21,67
+	size: 1190,1352
+	workspace: 1 (1)
+	floating: 0
+	monitor: 1
+	class: firefox
+	title: RTX Remix on Arch - Claude — Mozilla Firefox
+	initialClass: firefox
+	initialTitle: Mozilla Firefox
+	pid: 6564
+	xwayland: 0
+	pinned: 0
+	pinFullscreened: 0
+	fullscreen: 0
+	fullscreenClient: 0
+	fullscreenHandler: default
+	allowedOverFullscreen: 1
+	grouped: 0
+	tags: 
+	swallowing: 0
+	focusHistoryID: 5
+	inhibitingIdle: 0
+	xdgTag: 
+	xdgDescription: 
+	contentType: none
+	tearingHint: 0
+	stableID: 1800000d
+
+Window 55bbbeb0b5c0 -> Minecraft* 1.21.1:
+	mapped: 1
+	hidden: 0
+	visible: 1
+	acceptsInput: 1
+	at: 1286,67
+	size: 1253,1352
+	workspace: 4 (4)
+	floating: 0
+	monitor: 1
+	class: 
+	title: Minecraft* 1.21.1
+	initialClass: 
+	initialTitle: Minecraft* 1.21.1
+	pid: 1474529
+	xwayland: 0
+	pinned: 0
+	pinFullscreened: 0
+	fullscreen: 0
+	fullscreenClient: 0
+	fullscreenHandler: default
+	allowedOverFullscreen: 1
+	grouped: 0
+	tags: 
+	swallowing: 0
+	focusHistoryID: 1
+	inhibitingIdle: 0
+	xdgTag: 
+	xdgDescription: 
+	contentType: none
+	tearingHint: 0
+	stableID: 180000db
+
+Window 55bbbf463130 -> Minecraft* 1.21.1 - Singleplayer:
+	mapped: 1
+	hidden: 0
+	visible: 1
+	acceptsInput: 1
+	at: 21,67
+	size: 1253,1352
+	workspace: 4 (4)
+	floating: 0
+	monitor: 1
+	class: 
+	title: Minecraft* 1.21.1 - Singleplayer
+	initialClass: 
+	initialTitle: Minecraft* 1.21.1
+	pid: 1527143
+	xwayland: 0
+	pinned: 0
+	pinFullscreened: 0
+	fullscreen: 0
+	fullscreenClient: 0
+	fullscreenHandler: default
+	allowedOverFullscreen: 1
+	grouped: 0
+	tags: 
+	swallowing: 0
+	focusHistoryID: 0
+	inhibitingIdle: 0
+	xdgTag: 
+	xdgDescription: 
+	contentType: none
+	tearingHint: 0
+	stableID: 180000e0
+
+
