@@ -299,3 +299,9 @@ on the 5070, but please check it.
   not stick. Revisit with the input-forwarding work.
 - `PresentInfo.skipVulkanSwapchain`, `interopFlipY`, `clientDoneSemaphore_ValueToWait` and
   `StartupInfo.interopImage` are accepted and ignored until the interop work.
+
+### Verified on GPU: step 1 (reported by the user, 2026-10-26)
+RTX 5070, Arch Linux, NVIDIA driver **615.78.08**, `DXVK_REMIX_NVIDIA_MIN_DRIVER=600`.
+`tests/startup_remix.c` returned `Startup`, 3× `Present` and `Shutdown` all **0x0**, with no surface error.
+The device came up with RT, OMM, SER, NRC and the FD external memory/semaphore extensions enabled.
+The run took 14.3 s in total, about 13.5 s of it in `Shutdown`, with a cold shader cache.
