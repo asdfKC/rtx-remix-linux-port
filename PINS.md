@@ -9,3 +9,14 @@
 | DXVK native headers | github.com/doitsujin/dxvk | tag `v2.3.1` (`037d0fa1ad09`) `include/native/windows` | zlib licence |
 | mingw-directx-headers | github.com/Joshua-Ashton/mingw-directx-headers | `9df86f2341616ef1888ae59919feaa6d4fad693d` | DXVK v2.3.1's pinned submodule; subset vendored |
 | glslang, spirv-tools | distro | build container: Ubuntu 24.04 glslang 15.1.0, SPIRV-Tools v2025.1 | Arch equivalents: `glslang`, `spirv-tools` (extra) |
+
+## Minecraft side (Phase D)
+
+| What | Version | Where it is pinned |
+|---|---|---|
+| Minecraft | 1.21.1 | mod `build.gradle`, `scripts/install.sh` |
+| Fabric Loader | 0.16.5 | mod `build.gradle`, `scripts/install.sh` |
+| Fabric API | 0.116.10+1.21.1 | mod `build.gradle` (`stageFabricApi`) |
+| Gradle | 9.3.1, distribution sha256 `b266d5ff…beaff06` | mod `gradle/wrapper/gradle-wrapper.properties` |
+| gradle-wrapper.jar | sha256 `d3b261c2820e9e3d8d639ed084900f11f4a86050a8f83342ade7b6bc9b0d2bdd` | checked by `scripts/install.sh` |
+| Runtime textures | `rtx_remix_minecraft_runtime_textures@1.1.0` (Packman) | mod `packman/textures.packman.xml` |

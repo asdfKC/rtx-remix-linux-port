@@ -39,7 +39,32 @@ stays free. It needs about 15 GB. Steps:
    That script downloads NVIDIA's Packman bootstrap Python and the font archive from NVIDIA's CDN.
 5. Runs `meson setup` and `ninja`. The output is `build/src/d3d9/libremix.so`.
 
-## 3. Not yet covered
+## 3. Install the mod into Prism Launcher
+
+```sh
+sudo pacman -S --needed prismlauncher jdk21-openjdk   # if not installed yet; install.sh lists what is missing
+scripts/install.sh --work /mnt/big/rtx-remix-linux
+```
+
+| Package | Why |
+|---|---|
+| prismlauncher | Prism Launcher, runs the Minecraft instance (extra) |
+| jdk21-openjdk | Java 21: runs Minecraft 1.21.1 and Gradle, and provides `jni.h` for the bridge (extra) |
+
+`install.sh` never runs pacman or sudo. It:
+
+1. Clones NVIDIAGameWorks/rtx-remix-minecraft at the pinned commit into `<work>/rtx-remix-minecraft`, and applies
+   `patches/rtx-remix-minecraft/`.
+2. Checks `gradle-wrapper.jar` against its pinned SHA-256.
+3. Stages `<work>/build/src/d3d9/libremix.so` and the DLSS libraries (`./gradlew stageLinuxRuntime`).
+4. Builds the JAR (`./gradlew package`) and resolves Fabric API (`stageFabricApi`).
+5. Creates or updates the Prism instance `rtx-remix-linux`: Minecraft 1.21.1, Fabric Loader 0.16.5, Java 21, the
+   mod's JVM arguments, 2 GiB heap, and `DXVK_REMIX_NVIDIA_MIN_DRIVER=600` through a wrapper command.
+6. Copies the mod JAR and Fabric API into its `mods/`.
+
+Close Prism before running it. `--skip-tests` skips the unit tests, and `--help` lists the other options.
+
+## 4. Not yet covered
 
 - `libNRD.so` (the NRD denoiser library). The runtime loads it at run time and disables NRD if it is
   missing. Building it needs NVIDIA-RTX/MathLib, NVIDIA-RTX/ShaderMake and DXC

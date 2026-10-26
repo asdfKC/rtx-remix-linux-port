@@ -565,3 +565,25 @@ This environment blocks maven.fabricmc.net and Mojang's servers.
 - `verifyPackageJar` found every native entry. It reported only `fabric.mod.json` missing, which comes from the real
   `remapJar` and not from the stand-in.
 - **Jar size:** about 160 MB. `libremix.so` is 318 MB with no debug info: 275 MB of it is `.rodata`, the embedded shaders.
+
+## Phase D step 4: install.sh (2026-10-26)
+
+**Status:** syntax-checked, and the instance-writing path was run twice in the container against a temporary Prism
+directory, with dummy JARs and a stand-in `pacman` (the container is Ubuntu). The mod patches apply cleanly to the
+pinned commit with `git am`. **The Gradle build path, Prism itself and the game have not run here.**
+
+`scripts/install.sh` (see BUILD_LINUX.md §3):
+- **Packages:** it checks for the official packages and prints the `pacman` command with what each one is for.
+  It never runs pacman or sudo. It refuses to run while Prism is open.
+- **Build:** it clones the mod at the pin, applies the patch series, and checks the wrapper jar hash. Then it stages
+  the runtime from `<work>/build/src/d3d9`, builds `…-linux64.jar` with `./gradlew package`, and resolves Fabric API
+  through the build's own pinned coordinate.
+- **Instance:** `<Prism>/instances/rtx-remix-linux`, with Minecraft 1.21.1 + Fabric Loader 0.16.5, as the Windows
+  installer writes it.
+  - Java is pinned to `/usr/lib/jvm/java-21-openjdk`.
+  - JVM arguments come from the mod's `RECOMMENDED_JVM_ARGS` without heap sizes; the heap is MinMemAlloc 512, MaxMemAlloc 2048.
+  - `WrapperCommand=env DXVK_REMIX_NVIDIA_MIN_DRIVER=600`, because the runtime's driver minimum is not Linux-aware yet.
+- **Re-runs** keep a backup (`instance.cfg.bak`), update only those keys, and replace earlier copies of the mod and
+  Fabric API in this instance only.
+- **Escape hatches:** `--mod-jar` and `--fabric-api-jar` install prebuilt JARs. `--reset-mod` re-creates the
+  checkout's `linux-port` branch.
