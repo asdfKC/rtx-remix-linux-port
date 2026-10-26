@@ -1,0 +1,60 @@
+[18:31:33.974] info:  [RTX info] Opacity Micromap: supported
+[18:31:33.974] info:  [RTX info] Shader Execution Reordering: supported
+[18:31:33.974] info:  [RTX info] Shader Execution Reordering: enabled
+[18:31:33.974] info:  CPU supports SIMD: AVX2
+[18:31:34.001] info:  D3D9DeviceEx::ResetSwapChain:
+[18:31:34.001] info:    Requested Presentation Parameters
+[18:31:34.001] info:      - Width:              854
+[18:31:34.001] info:      - Height:             480
+[18:31:34.001] info:      - Format:             D3D9Format::Unknown
+[18:31:34.001] info:      - Auto Depth Stencil: false
+[18:31:34.001] info:                  ^ Format: D3D9Format::Unknown
+[18:31:34.001] info:      - Windowed:           true
+[18:31:34.162] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/water.conf...
+[18:31:34.162] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/water.conf
+[18:31:34.162] info:  Parsed config file.
+[18:31:34.163] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/view_distance.conf...
+[18:31:34.163] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/view_distance.conf
+[18:31:34.163] info:  Parsed config file.
+[18:31:34.164] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/volumetrics/settling.conf...
+[18:31:34.164] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/volumetrics/settling.conf
+[18:31:34.164] info:  Parsed config file.
+[18:31:34.165] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/weather/thunder.conf...
+[18:31:34.165] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/weather/thunder.conf
+[18:31:34.165] info:  Parsed config file.
+[18:31:34.165] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/weather/rain.conf...
+[18:31:34.165] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/weather/rain.conf
+[18:31:34.165] info:  Parsed config file.
+[18:31:34.166] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/time/dawn.conf...
+[18:31:34.166] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/time/dawn.conf
+[18:31:34.166] info:  Parsed config file.
+[18:31:34.166] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/time/day.conf...
+[18:31:34.166] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/time/day.conf
+[18:31:34.166] info:  Parsed config file.
+[18:31:34.167] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/time/dusk.conf...
+[18:31:34.167] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/time/dusk.conf
+[18:31:34.167] info:  Parsed config file.
+[18:31:34.167] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/time/night.conf...
+[18:31:34.167] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/time/night.conf
+[18:31:34.167] info:  Parsed config file.
+[18:31:34.167] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/biomes/plains.conf...
+[18:31:34.167] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/biomes/plains.conf
+[18:31:34.167] info:  Parsed config file.
+[18:31:34.167] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/zones/cave.conf...
+[18:31:34.167] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/zones/cave.conf
+[18:31:34.167] info:  Parsed config file.
+[18:31:34.197] info:  [RTX-Compatibility-Info] Trying to raytrace but not detecting a valid camera.
+[18:31:34.267] info:  D3D9DeviceEx::ResetSwapChain:
+[18:31:34.267] info:    Requested Presentation Parameters
+[18:31:34.267] info:      - Width:              1253
+[18:31:34.267] info:      - Height:             1352
+[18:31:34.267] info:      - Format:             D3D9Format::X8R8G8B8
+[18:31:34.267] info:      - Auto Depth Stencil: false
+[18:31:34.267] info:                  ^ Format: D3D9Format::Unknown
+[18:31:34.267] info:      - Windowed:           true
+[18:42:45.233] err:   Texture (12288x10240) doesn't fit into STAGING memory for streaming (TEXTURE=160MB, but STAGING=96MB). Forcing synchronous upload, disabling texture streaming on: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/textures/water_normals_flipbook.dds
+[18:42:45.420] info:  RenderPass GBuffer Raytrace Mode: Ray Query (CS)
+[18:42:45.420] info:  RenderPass Integrate Direct Raytrace Mode: Ray Query (CS)
+[18:42:45.420] info:  RenderPass Integrate Indirect Raytrace Mode: Trace Ray (RGS)
+[18:42:45.421] warn:  [RTX Sparse Rendering] DLSS Ray Reconstruction is disabled; sparse rendering will not run. It will resume automatically when DLSS Ray Reconstruction is re-enabled.
+[18:42:47.479] info:  [RTX] Integrate Indirect Mode: Spatially Hashed Radiance Cache - activated
