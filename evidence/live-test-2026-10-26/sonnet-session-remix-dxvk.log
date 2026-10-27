@@ -1,0 +1,400 @@
+[19:46:15.674] info:  Game: java
+[19:46:15.674] info:  DXVK_Remix: remix-main+3c683abd-linux
+[19:46:15.675] info:  System Information Report:
+[19:46:15.675] info:    CPU: (AuthenticAMD) AMD Ryzen 7 7800X3D 8-Core Processor
+[19:46:15.675] info:    Memory: 20.61 GiB / 30.46 GiB physical, 10.17 GiB / 20.00 GiB swap
+[19:46:15.675] info:    OS: Linux 7.2.9-zen1-1-zen x86_64
+[19:46:15.675] info:  Initializing RtxOptions...
+[19:46:15.675] info:  Initializing RtxOption system layers...
+[19:46:15.675] info:  Attempting to parse option layer: dxvk.conf...
+[19:46:15.675] info:  No config file found at: dxvk.conf
+[19:46:15.675] info:  Did not find app config for executable: /home/kushcool/.local/share/PrismLauncher/java/java-runtime-delta/bin/java
+[19:46:15.676] info:  Attempting to parse option layer: rtx.conf...
+[19:46:15.676] info:  Found config file: rtx.conf
+[19:46:15.676] info:  Parsed config file.
+[19:46:15.676] info:  Effective Combined Config for DXVK Options configuration:
+[19:46:15.676] info:    rtx.neuralRadianceCache.wrapPositionsToSceneBounds = true
+[19:46:15.676] info:    rtx.rayreconstruction.combineSpecularAlbedo = true
+[19:46:15.676] info:    rtx.gpuResidentScene = true
+[19:46:15.676] info:    rtx.viewModel.enable = true
+[19:46:15.676] info:    rtx.subsurface.enableThinOpaqueInRefractions = false
+[19:46:15.676] info:    rtx.autoExposure.autoExposureSpeed = 10
+[19:46:15.676] info:    rtx.sceneScale = 0.01
+[19:46:15.676] info:    rtx.localtonemap.shadows = 1.4
+[19:46:15.676] info:    rtx.viewDistance.distanceFadeMax = 409.6
+[19:46:15.676] info:    rtx.vertexColorIsBakedLighting = false
+[19:46:15.676] info:    rtx.dlfg.enable = false
+[19:46:15.676] info:    rtx.autoExposure.exposureAverageMode = 0
+[19:46:15.676] info:    rtx.remixMenuKeyBinds = CTRL, SHIFT, ALT, PAUSE
+[19:46:15.676] info:    rtx.uniqueObjectDistance = 10.0
+[19:46:15.676] info:    rtx.enableIndirectTranslucentShadows = true
+[19:46:15.676] info:    rtx.localtonemap.exposurePreferenceSigma = 3.5
+[19:46:15.676] info:    rtx.showLegacyACESOption = true
+[19:46:15.676] info:    rtx.enableInputQueuePing = True
+[19:46:15.676] info:    rtx.viewDistance.distanceMode = 3
+[19:46:15.676] info:    rtx.autoExposure.evMinValue = -2.5
+[19:46:15.676] info:    rtx.opacityMicromap.enable = false
+[19:46:15.676] info:    rtx.localtonemap.exposure = 0.21405728
+[19:46:15.676] info:    rtx.spatiallyHashedRadianceCache.queryForThinOpaquePrimaryView = True
+[19:46:15.676] info:    rtx.bloom.steps = 8
+[19:46:15.676] info:    rtx.localtonemap.exposurePreferenceOffset = -0.1
+[19:46:15.676] info:    rtx.enableDirectTranslucentShadows = true
+[19:46:15.676] info:    rtx.useLegacyACES = False
+[19:46:15.677] info:    rtx.materials.enableUvBoundsLooping = true
+[19:46:15.677] info:    rtx.showUICursor = false
+[19:46:15.677] info:    rtx.autoExposure.evMaxValue = 1.5
+[19:46:15.677] info:    rtx.hideSplashMessage = true
+[19:46:15.677] info:    rtx.viewModel.perspectiveCorrection = true
+[19:46:15.677] info:    rtx.neuralRadianceCache.selfTrainingAttenuation = 0.1
+[19:46:15.677] info:    rtx.vertexColorStrength = 1.0
+[19:46:15.677] info:    rtx.sparseRendering.enableRtxdiReuseForInactivePixels = true
+[19:46:15.677] info:    rtx.enableCulling = false
+[19:46:15.677] info:    rtx.autoExposure.centerMeteringSize = 0.75
+[19:46:15.677] info:    rtx.autoExposure.exposureCenterMeteringEnabled = true
+[19:46:15.677] info:    rtx.sparseRendering.enableSparseRendering = true
+[19:46:15.677] info:    rtx.neuralRadianceCache.sceneBoundsWidthMeters = 600.0
+[19:46:15.677] info:    rtx.neuralRadianceCache.resetSceneBoundsOnCameraCut = false
+[19:46:15.677] info:    rtx.volumetrics.enableAtmosphere = false
+[19:46:15.677] info:    rtx.neeCache.enableReshuffleResilience = false
+[19:46:15.677] info:    rtx.bloom.luminanceThreshold = 250
+[19:46:15.677] info:    rtx.minimizeBlasMerging = true
+[19:46:15.677] info:    rtx.spatiallyHashedRadianceCache.staleFrameNumber = 1024
+[19:46:15.677] info:    rtx.volumetrics.froxelMaxDistanceMeters = 256.f;
+[19:46:15.677] info:    rtx.subsurface.disableThinOpaqueInSecondaryRays = True
+[19:46:15.677] info:    rtx.materials.smoothReliefMapFiltering = false
+[19:46:15.677] info:    rtx.bloom.burnIntensity = 0.1
+[19:46:15.677] info:    rtx.volumetrics.enableTranslucentShadows = true
+[19:46:15.677] info:    rtx.spatiallyHashedRadianceCache.maxNumFramesToAccumulate = 1000
+[19:46:15.677] info:    rtx.viewDistance.distanceFunction = 1
+[19:46:15.677] info:    rtx.useAnisotropicFiltering = false
+[19:46:15.677] info:    rtx.viewDistance.noiseScale = 20.0
+[19:46:15.677] info:    rtx.viewDistance.distanceFadeMin = 358.4
+[19:46:15.677] info:    rtx.localtonemap.highlights = 2.5
+[19:46:15.677] info:    rtx.ignoreSkyIfCameraInMedium = true
+[19:46:15.677] info:    rtx.volumetrics.atmosphereHeightMeters = 2000.0
+[19:46:15.677] info:    rtx.sparseRendering.quality = 0.3
+[19:46:15.677] info:  Attempting to parse option layer: user.conf...
+[19:46:15.677] info:  No config file found at: user.conf
+[19:46:15.677] info:  Loading environment variable overrides:
+[19:46:15.677] info:    rtx.shader.enableAsyncCompilation = 0 (from RTX_ENABLE_ASYNC_COMPILATION)
+[19:46:15.677] info:  RtxOption system layer initialization complete.
+[19:46:15.677] info:  Geometry generation hash rule:
+[19:46:15.677] info:  	positions
+[19:46:15.677] info:  	indices
+[19:46:15.677] info:  	texcoords
+[19:46:15.677] info:  	geometrydescriptor
+[19:46:15.677] info:  	vertexlayout
+[19:46:15.677] info:  	vertexshader
+[19:46:15.677] info:  [RTX Neural Radiance Cache] Selected Ultra preset mode.
+[19:46:15.677] info:  Geometry asset hash rule:
+[19:46:15.677] info:  	positions
+[19:46:15.677] info:  	indices
+[19:46:15.677] info:  	geometrydescriptor
+[19:46:15.677] info:  Effective RtxOption values (after all config layers and migrations):
+[19:46:15.677] info:    rtx.autoExposure.exposureAverageMode = 0
+[19:46:15.677] info:    rtx.viewDistance.distanceFadeMax = 409.6
+[19:46:15.677] info:    rtx.dlfg.enable = False
+[19:46:15.677] info:    rtx.neeCache.enableReshuffleResilience = False
+[19:46:15.677] info:    rtx.autoExposure.autoExposureSpeed = 10
+[19:46:15.677] info:    rtx.viewDistance.distanceFunction = 1
+[19:46:15.677] info:    rtx.bloom.burnIntensity = 0.1
+[19:46:15.677] info:    rtx.bloom.steps = 8
+[19:46:15.677] info:    rtx.neuralRadianceCache.resetSceneBoundsOnCameraCut = False
+[19:46:15.677] info:    rtx.vertexColorIsBakedLighting = False
+[19:46:15.677] info:    rtx.neuralRadianceCache.sceneBoundsWidthMeters = 600
+[19:46:15.677] info:    rtx.hideSplashMessage = True
+[19:46:15.677] info:    rtx.enableIndirectTranslucentShadows = True
+[19:46:15.677] info:    rtx.neuralRadianceCache.trainingMaxPathBounces = 9
+[19:46:15.677] info:    rtx.localtonemap.highlights = 2.5
+[19:46:15.677] info:    rtx.sparseRendering.quality = 0.3
+[19:46:15.677] info:    rtx.minimizeBlasMerging = True
+[19:46:15.677] info:    rtx.useAnisotropicFiltering = False
+[19:46:15.677] info:    rtx.enableInputQueuePing = True
+[19:46:15.677] info:    rtx.localtonemap.shadows = 1.4
+[19:46:15.677] info:    rtx.bloom.luminanceThreshold = 250
+[19:46:15.677] info:    rtx.viewDistance.distanceFadeMin = 358.4
+[19:46:15.677] info:    rtx.showUICursor = False
+[19:46:15.677] info:    rtx.localtonemap.exposurePreferenceOffset = -0.1
+[19:46:15.677] info:    rtx.autoExposure.evMinValue = -2.5
+[19:46:15.677] info:    rtx.enableDirectTranslucentShadows = True
+[19:46:15.677] info:    rtx.autoExposure.exposureCenterMeteringEnabled = True
+[19:46:15.677] info:    rtx.autoExposure.centerMeteringSize = 0.75
+[19:46:15.677] info:    rtx.vertexColorStrength = 1
+[19:46:15.677] info:    rtx.viewDistance.distanceMode = 3
+[19:46:15.677] info:    rtx.useLegacyACES = False
+[19:46:15.677] info:    rtx.uniqueObjectDistance = 10
+[19:46:15.677] info:    rtx.viewModel.enable = True
+[19:46:15.677] info:    rtx.sparseRendering.enableSparseRendering = True
+[19:46:15.677] info:    rtx.viewDistance.noiseScale = 20
+[19:46:15.677] info:    rtx.localtonemap.exposure = 0.214057
+[19:46:15.677] info:    rtx.volumetrics.atmosphereHeightMeters = 2000
+[19:46:15.677] info:    rtx.volumetrics.enableTranslucentShadows = True
+[19:46:15.677] info:    rtx.spatiallyHashedRadianceCache.staleFrameNumber = 1024
+[19:46:15.677] info:    rtx.enableCulling = False
+[19:46:15.677] info:    rtx.autoExposure.evMaxValue = 1.5
+[19:46:15.677] info:    rtx.spatiallyHashedRadianceCache.maxNumFramesToAccumulate = 1000
+[19:46:15.677] info:    rtx.volumetrics.froxelMaxDistanceMeters = 256
+[19:46:15.677] info:    rtx.neuralRadianceCache.selfTrainingAttenuation = 0.1
+[19:46:15.677] info:    rtx.localtonemap.exposurePreferenceSigma = 3.5
+[19:46:15.677] info:    rtx.sceneScale = 0.01
+[19:46:15.677] info:    rtx.opacityMicromap.enable = False
+[19:46:15.677] info:    rtx.remixMenuKeyBinds = CTRL,SHFT,ALT,PAUSE
+[19:46:15.677] info:    rtx.shader.enableAsyncCompilation = False
+[19:46:15.677] info:    rtx.showLegacyACESOption = True
+[19:46:15.677] info:  Built-in extension providers:
+[19:46:15.677] info:    Headless (Linux)
+[19:46:15.677] info:    OpenVR
+[19:46:15.677] info:    OpenXR
+[19:46:15.677] info:  OpenVR: could not open registry key, status 2
+[19:46:15.677] info:  OpenVR: Failed to locate module
+[19:46:15.684] info:  Enabled instance extensions:
+[19:46:15.684] info:    VK_KHR_external_memory_capabilities
+[19:46:15.684] info:    VK_KHR_external_semaphore_capabilities
+[19:46:15.684] info:    VK_KHR_get_physical_device_properties2
+[19:46:15.684] info:    VK_KHR_get_surface_capabilities2
+[19:46:15.684] info:    VK_KHR_surface
+[19:46:15.684] info:  Enabled Layer Names:
+[19:46:15.696] info:  Vulkan instance layers:
+[19:46:15.696] info:    VK_LAYER_MESA_anti_lag
+[19:46:15.696] info:    VK_LAYER_MESA_device_select
+[19:46:15.696] info:    VK_LAYER_NV_optimus
+[19:46:15.696] info:    VK_LAYER_NV_present
+[19:46:15.696] info:    VK_LAYER_VALVE_steam_fossilize_32
+[19:46:15.696] info:    VK_LAYER_VALVE_steam_fossilize_64
+[19:46:15.696] info:    VK_LAYER_VALVE_steam_overlay_32
+[19:46:15.696] info:    VK_LAYER_VALVE_steam_overlay_64
+[19:46:15.696] info:  Vulkan instance extensions:
+[19:46:15.696] info:    VK_EXT_acquire_drm_display
+[19:46:15.696] info:    VK_EXT_acquire_xlib_display
+[19:46:15.696] info:    VK_EXT_debug_report
+[19:46:15.696] info:    VK_EXT_debug_utils
+[19:46:15.696] info:    VK_EXT_direct_mode_display
+[19:46:15.696] info:    VK_EXT_display_surface_counter
+[19:46:15.696] info:    VK_EXT_layer_settings
+[19:46:15.696] info:    VK_EXT_surface_maintenance1
+[19:46:15.696] info:    VK_EXT_swapchain_colorspace
+[19:46:15.696] info:    VK_KHR_device_group_creation
+[19:46:15.696] info:    VK_KHR_display
+[19:46:15.696] info:    VK_KHR_external_fence_capabilities
+[19:46:15.696] info:    VK_KHR_external_memory_capabilities
+[19:46:15.696] info:    VK_KHR_external_semaphore_capabilities
+[19:46:15.696] info:    VK_KHR_get_display_properties2
+[19:46:15.696] info:    VK_KHR_get_physical_device_properties2
+[19:46:15.696] info:    VK_KHR_get_surface_capabilities2
+[19:46:15.696] info:    VK_KHR_portability_enumeration
+[19:46:15.696] info:    VK_KHR_surface
+[19:46:15.696] info:    VK_KHR_surface_maintenance1
+[19:46:15.696] info:    VK_KHR_surface_protected_capabilities
+[19:46:15.696] info:    VK_KHR_wayland_surface
+[19:46:15.696] info:    VK_KHR_xcb_surface
+[19:46:15.696] info:    VK_KHR_xlib_surface
+[19:46:15.696] info:    VK_LUNARG_direct_driver_loading
+[19:46:15.696] info:    VK_NV_display_stereo
+[19:46:15.696] info:  D3D9: VK_FORMAT_D16_UNORM_S8_UINT -> VK_FORMAT_D24_UNORM_S8_UINT
+[19:46:15.696] info:  NVIDIA GeForce RTX 5070:
+[19:46:15.696] info:    Driver: 615.78.8
+[19:46:15.696] info:    Vulkan: 1.4.351
+[19:46:15.696] info:    Memory Heap[0]: 
+[19:46:15.696] info:      Size: 12227 MiB
+[19:46:15.696] info:      Flags: 0x1
+[19:46:15.696] info:      Memory Type[1]: Property Flags = 0x1
+[19:46:15.696] info:      Memory Type[4]: Property Flags = 0x7
+[19:46:15.696] info:    Memory Heap[1]: 
+[19:46:15.696] info:      Size: 23390 MiB
+[19:46:15.696] info:      Flags: 0x0
+[19:46:15.696] info:      Memory Type[0]: Property Flags = 0x0
+[19:46:15.696] info:      Memory Type[2]: Property Flags = 0x6
+[19:46:15.696] info:      Memory Type[3]: Property Flags = 0xe
+[19:46:15.696] info:  Process set as DPI aware
+[19:46:15.696] info:  Device properties:
+[19:46:15.696] info:    Device name:     : NVIDIA GeForce RTX 5070
+[19:46:15.696] info:    Vendor name:     : NVIDIA
+[19:46:15.696] info:    Device ID:       : 0x2f04
+[19:46:15.696] info:    Vendor ID:       : 0x10de
+[19:46:15.696] info:    Driver version   : 615.78.8
+[19:46:15.697] info:  Enabled device extensions:
+[19:46:15.697] info:    VK_EXT_4444_formats
+[19:46:15.697] info:    VK_EXT_calibrated_timestamps
+[19:46:15.697] info:    VK_EXT_conservative_rasterization
+[19:46:15.697] info:    VK_EXT_custom_border_color
+[19:46:15.697] info:    VK_EXT_depth_clip_enable
+[19:46:15.697] info:    VK_EXT_extended_dynamic_state
+[19:46:15.697] info:    VK_EXT_memory_priority
+[19:46:15.697] info:    VK_EXT_opacity_micromap
+[19:46:15.697] info:    VK_EXT_robustness2
+[19:46:15.697] info:    VK_EXT_shader_atomic_float
+[19:46:15.697] info:    VK_EXT_shader_demote_to_helper_invocation
+[19:46:15.697] info:    VK_EXT_shader_viewport_index_layer
+[19:46:15.697] info:    VK_EXT_transform_feedback
+[19:46:15.697] info:    VK_EXT_vertex_attribute_divisor
+[19:46:15.697] info:    VK_KHR_acceleration_structure
+[19:46:15.697] info:    VK_KHR_buffer_device_address
+[19:46:15.697] info:    VK_KHR_create_renderpass2
+[19:46:15.697] info:    VK_KHR_deferred_host_operations
+[19:46:15.697] info:    VK_KHR_depth_stencil_resolve
+[19:46:15.697] info:    VK_KHR_draw_indirect_count
+[19:46:15.697] info:    VK_KHR_driver_properties
+[19:46:15.697] info:    VK_KHR_external_memory
+[19:46:15.697] info:    VK_KHR_external_memory_fd
+[19:46:15.697] info:    VK_KHR_external_semaphore
+[19:46:15.697] info:    VK_KHR_external_semaphore_fd
+[19:46:15.697] info:    VK_KHR_image_format_list
+[19:46:15.697] info:    VK_KHR_maintenance4
+[19:46:15.697] info:    VK_KHR_pipeline_library
+[19:46:15.697] info:    VK_KHR_push_descriptor
+[19:46:15.697] info:    VK_KHR_ray_query
+[19:46:15.697] info:    VK_KHR_ray_tracing_pipeline
+[19:46:15.697] info:    VK_KHR_sampler_mirror_clamp_to_edge
+[19:46:15.697] info:    VK_KHR_shader_float16_int8
+[19:46:15.697] info:    VK_KHR_shader_float_controls
+[19:46:15.697] info:    VK_KHR_swapchain
+[19:46:15.697] info:    VK_KHR_synchronization2
+[19:46:15.697] info:    VK_NVX_binary_import
+[19:46:15.697] info:    VK_NVX_image_view_handle
+[19:46:15.697] info:    VK_NV_low_latency
+[19:46:15.697] info:    VK_NV_present_metering
+[19:46:15.697] info:    VK_NV_ray_tracing_invocation_reorder
+[19:46:15.697] info:  Device features:
+[19:46:15.697] info:    robustBufferAccess                     : 1
+[19:46:15.697] info:    fullDrawIndexUint32                    : 1
+[19:46:15.697] info:    imageCubeArray                         : 1
+[19:46:15.697] info:    independentBlend                       : 1
+[19:46:15.697] info:    geometryShader                         : 1
+[19:46:15.697] info:    tessellationShader                     : 0
+[19:46:15.697] info:    sampleRateShading                      : 1
+[19:46:15.697] info:    dualSrcBlend                           : 0
+[19:46:15.697] info:    logicOp                                : 0
+[19:46:15.697] info:    multiDrawIndirect                      : 0
+[19:46:15.697] info:    drawIndirectFirstInstance              : 0
+[19:46:15.697] info:    depthClamp                             : 1
+[19:46:15.697] info:    depthBiasClamp                         : 1
+[19:46:15.697] info:    fillModeNonSolid                       : 1
+[19:46:15.697] info:    depthBounds                            : 1
+[19:46:15.697] info:    multiViewport                          : 1
+[19:46:15.697] info:    samplerAnisotropy                      : 1
+[19:46:15.697] info:    textureCompressionBC                   : 1
+[19:46:15.697] info:    occlusionQueryPrecise                  : 1
+[19:46:15.697] info:    pipelineStatisticsQuery                : 1
+[19:46:15.697] info:    vertexPipelineStoresAndAtomics         : 1
+[19:46:15.697] info:    fragmentStoresAndAtomics               : 0
+[19:46:15.697] info:    shaderImageGatherExtended              : 0
+[19:46:15.697] info:    shaderStorageImageExtendedFormats      : 0
+[19:46:15.697] info:    shaderStorageImageReadWithoutFormat    : 1
+[19:46:15.697] info:    shaderStorageImageWriteWithoutFormat   : 1
+[19:46:15.697] info:    shaderClipDistance                     : 1
+[19:46:15.697] info:    shaderCullDistance                     : 1
+[19:46:15.697] info:    shaderFloat64                          : 0
+[19:46:15.697] info:    shaderInt64                            : 1
+[19:46:15.697] info:    variableMultisampleRate                : 0
+[19:46:15.697] info:    hostQueryReset                         : 1
+[19:46:15.697] info:    scalarBlockLayout                      : 1
+[19:46:15.697] info:    uniformBufferStandardLayout            : 1
+[19:46:15.697] info:  VK_EXT_4444_formats
+[19:46:15.697] info:    formatA4R4G4B4                         : 1
+[19:46:15.697] info:    formatA4B4G4R4                         : 1
+[19:46:15.697] info:  VK_EXT_custom_border_color
+[19:46:15.697] info:    customBorderColors                     : 1
+[19:46:15.697] info:    customBorderColorWithoutFormat         : 1
+[19:46:15.697] info:  VK_EXT_depth_clip_enable
+[19:46:15.697] info:    depthClipEnable                        : 1
+[19:46:15.697] info:  VK_EXT_extended_dynamic_state
+[19:46:15.697] info:    extendedDynamicState                   : 1
+[19:46:15.697] info:  VK_EXT_memory_priority
+[19:46:15.697] info:    memoryPriority                         : 1
+[19:46:15.697] info:  VK_EXT_robustness2
+[19:46:15.697] info:    robustBufferAccess2                    : 1
+[19:46:15.697] info:    robustImageAccess2                     : 0
+[19:46:15.697] info:    nullDescriptor                         : 1
+[19:46:15.697] info:  VK_EXT_shader_demote_to_helper_invocation
+[19:46:15.697] info:    shaderDemoteToHelperInvocation         : 1
+[19:46:15.697] info:  VK_EXT_transform_feedback
+[19:46:15.697] info:    transformFeedback                      : 1
+[19:46:15.697] info:    geometryStreams                        : 0
+[19:46:15.697] info:  VK_EXT_vertex_attribute_divisor
+[19:46:15.697] info:    vertexAttributeInstanceRateDivisor     : 1
+[19:46:15.697] info:    vertexAttributeInstanceRateZeroDivisor : 1
+[19:46:15.697] info:  VK_KHR_buffer_device_address
+[19:46:15.697] info:    bufferDeviceAddress                    : 1
+[19:46:15.697] info:  Queue families:
+[19:46:15.697] info:    Graphics : 0
+[19:46:15.697] info:    Transfer : 1
+[19:46:15.697] info:    Async Compute : 2
+[19:46:15.697] info:    Present : 2
+[19:46:15.959] info:  DXVK: Read 19 valid state cache entries
+[19:46:15.959] info:  DXVK: Using 5 compiler threads
+[19:46:15.961] info:  [RTX info] Neural Radiance Cache: supported
+[19:46:15.962] err:   Unable to load NRD, this feature will be disabled
+[19:46:15.962] err:   Unable to load NRD, this feature will be disabled
+[19:46:15.962] err:   Unable to load NRD, this feature will be disabled
+[19:46:15.962] err:   Unable to load NRD, this feature will be disabled
+[19:46:15.962] err:   Unable to load NRD, this feature will be disabled
+[19:46:15.962] err:   Unable to load NRD, this feature will be disabled
+[19:46:15.962] err:   Unable to load NRD, this feature will be disabled
+[19:46:15.962] info:  NGX (DLSS) is off on Linux; set REMIX_LINUX_ENABLE_NGX=1 to try it
+[19:46:15.979] info:  Reflex is not available in the Linux build.
+[19:46:15.990] info:  Automatic Graphics Preset in use (Set rtx.graphicsPreset to something other than Auto use a non-automatic preset)
+[19:46:15.990] info:  NVIDIA Turing architecture detected, setting default graphics settings to Low
+[19:46:15.990] info:  Automatic Raytrace Mode Preset in use (Set rtx.raytraceModePreset to something other than Auto use a non-automatic preset)
+[19:46:15.990] info:  NVIDIA architecture detected, setting default raytrace modes to Trace Ray (Indirect Integrate) and Ray Query (GBuffer, Direct Integrate)
+[19:46:16.061] info:  [RTX info] Opacity Micromap: supported
+[19:46:16.061] info:  [RTX info] Shader Execution Reordering: supported
+[19:46:16.061] info:  [RTX info] Shader Execution Reordering: enabled
+[19:46:16.061] info:  CPU supports SIMD: AVX2
+[19:46:16.075] info:  D3D9DeviceEx::ResetSwapChain:
+[19:46:16.075] info:    Requested Presentation Parameters
+[19:46:16.075] info:      - Width:              854
+[19:46:16.075] info:      - Height:             480
+[19:46:16.075] info:      - Format:             D3D9Format::Unknown
+[19:46:16.075] info:      - Auto Depth Stencil: false
+[19:46:16.075] info:                  ^ Format: D3D9Format::Unknown
+[19:46:16.075] info:      - Windowed:           true
+[19:46:16.144] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/water.conf...
+[19:46:16.144] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/water.conf
+[19:46:16.144] info:  Parsed config file.
+[19:46:16.145] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/view_distance.conf...
+[19:46:16.145] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/view_distance.conf
+[19:46:16.145] info:  Parsed config file.
+[19:46:16.146] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/volumetrics/settling.conf...
+[19:46:16.146] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/volumetrics/settling.conf
+[19:46:16.146] info:  Parsed config file.
+[19:46:16.146] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/weather/thunder.conf...
+[19:46:16.146] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/weather/thunder.conf
+[19:46:16.146] info:  Parsed config file.
+[19:46:16.146] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/weather/rain.conf...
+[19:46:16.146] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/weather/rain.conf
+[19:46:16.146] info:  Parsed config file.
+[19:46:16.146] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/time/dawn.conf...
+[19:46:16.146] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/time/dawn.conf
+[19:46:16.146] info:  Parsed config file.
+[19:46:16.147] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/time/day.conf...
+[19:46:16.147] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/time/day.conf
+[19:46:16.147] info:  Parsed config file.
+[19:46:16.147] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/time/dusk.conf...
+[19:46:16.147] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/time/dusk.conf
+[19:46:16.147] info:  Parsed config file.
+[19:46:16.147] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/time/night.conf...
+[19:46:16.147] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/time/night.conf
+[19:46:16.147] info:  Parsed config file.
+[19:46:16.147] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/biomes/plains.conf...
+[19:46:16.147] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/biomes/plains.conf
+[19:46:16.147] info:  Parsed config file.
+[19:46:16.147] info:  Attempting to parse option layer: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/zones/cave.conf...
+[19:46:16.147] info:  Found config file: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/rtx-remix/mods/minecraft-logic/confs/zones/cave.conf
+[19:46:16.147] info:  Parsed config file.
+[19:46:16.186] info:  [RTX-Compatibility-Info] Trying to raytrace but not detecting a valid camera.
+[19:46:16.233] info:  D3D9DeviceEx::ResetSwapChain:
+[19:46:16.233] info:    Requested Presentation Parameters
+[19:46:16.233] info:      - Width:              1253
+[19:46:16.233] info:      - Height:             1352
+[19:46:16.233] info:      - Format:             D3D9Format::X8R8G8B8
+[19:46:16.233] info:      - Auto Depth Stencil: false
+[19:46:16.233] info:                  ^ Format: D3D9Format::Unknown
+[19:46:16.233] info:      - Windowed:           true
+[19:46:19.242] err:   Texture (12288x10240) doesn't fit into STAGING memory for streaming (TEXTURE=160MB, but STAGING=96MB). Forcing synchronous upload, disabling texture streaming on: /home/kushcool/.local/share/PrismLauncher/instances/rtx-remix-linux/.minecraft/textures/water_normals_flipbook.dds
+[19:46:19.404] info:  [RTX-Compatibility-Info] Unexpected values in the perspective-corrected transform of a view model. Fallback to geometry modification
+[19:46:19.407] info:  RenderPass GBuffer Raytrace Mode: Ray Query (CS)
+[19:46:19.408] info:  RenderPass Integrate Direct Raytrace Mode: Ray Query (CS)
+[19:46:19.408] info:  RenderPass Integrate Indirect Raytrace Mode: Trace Ray (RGS)
+[19:46:19.408] warn:  [RTX Sparse Rendering] DLSS Ray Reconstruction is disabled; sparse rendering will not run. It will resume automatically when DLSS Ray Reconstruction is re-enabled.
+[19:46:19.441] info:  [RTX] Integrate Indirect Mode: Spatially Hashed Radiance Cache - activated
+[19:48:09.525] err:   [41] common device objects were not disposed of.
