@@ -1,8 +1,8 @@
-From a27b3c12e6ab84979e731c007694da974d583952 Mon Sep 17 00:00:00 2001
+From 70af6a038109804fc51fc9607737d84d33e9185d Mon Sep 17 00:00:00 2001
 From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
 Date: Mon, 26 Oct 2026 23:23:50 +0000
-Subject: [PATCH] Linux interop: runtime FD contract, binary semaphores; DLSS
- opt-in
+Subject: [PATCH 4/5] Linux interop: runtime FD contract, binary semaphores;
+ DLSS opt-in
 
 GlInterop on Linux now follows the runtime's dxvk_GetInteropInfo
 contract:

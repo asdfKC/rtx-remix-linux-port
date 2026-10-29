@@ -1,7 +1,7 @@
-From ab4fab9756be80e7344c9c59445b88fa53837612 Mon Sep 17 00:00:00 2001
+From 09085a823d8d70bb2d608277ff114da054f993d3 Mon Sep 17 00:00:00 2001
 From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
 Date: Mon, 26 Oct 2026 13:27:58 +0000
-Subject: [PATCH 2/3] Linux: runtime and bridge names, FD interop import,
+Subject: [PATCH 2/5] Linux: runtime and bridge names, FD interop import,
  headless present
 
 - NativeExtractor maps Linux x86_64 to native/remix-sdk-linux64. A

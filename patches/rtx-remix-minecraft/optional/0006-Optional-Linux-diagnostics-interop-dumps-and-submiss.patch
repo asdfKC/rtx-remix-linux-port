@@ -1,0 +1,244 @@
+From 4042b38e564d648c152e98fee1ece1d64d72af6a Mon Sep 17 00:00:00 2001
+From: "Claude (for Kush)" <kushisthecoolest@gmail.com>
+Date: Thu, 29 Oct 2026 01:20:35 +0000
+Subject: [PATCH] Optional Linux diagnostics: interop dumps and submission log
+ (off by default)
+
+Squashes the two live-test diagnostic commits from 2026-10-26 (Kush J,
+with Claude Sonnet 5): InteropTextureDumper, and RemixRenderer's
+once-per-second camera/lights/chunks/submit/present summary. They found
+the black interop image that the GL_DEDICATED_MEMORY_OBJECT_EXT fix
+resolves.
+
+Both are now off unless REMIX_LINUX_DIAGNOSTICS=1. Dumps go to
+REMIX_LINUX_DIAG_DIR (default remix-diagnostics/ in the game directory)
+instead of a fixed /mnt/big path, at 30 s, 2 min and 5 min after the
+interop texture first appears. Success messages log at info, not error.
+
+Co-Authored-By: Kush J <kushisthecoolest@gmail.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Tb41TgDi74v7sgH5LJBZ5A
+Signed-off-by: Claude (for Kush) <kushisthecoolest@gmail.com>
+---
+ .../rtxremix/minecraft/RemixRenderer.java     |  27 ++++
+ .../rtxremix/minecraft/RtxRemixMod.java       |   2 +
+ .../minecraft/gl/InteropTextureDumper.java    | 126 ++++++++++++++++++
+ 3 files changed, 155 insertions(+)
+ create mode 100644 src/main/java/com/nvidia/rtxremix/minecraft/gl/InteropTextureDumper.java
+
+diff --git a/src/main/java/com/nvidia/rtxremix/minecraft/RemixRenderer.java b/src/main/java/com/nvidia/rtxremix/minecraft/RemixRenderer.java
+index d5fcd59..4083af7 100644
+--- a/src/main/java/com/nvidia/rtxremix/minecraft/RemixRenderer.java
++++ b/src/main/java/com/nvidia/rtxremix/minecraft/RemixRenderer.java
+@@ -22,6 +22,7 @@ import com.nvidia.rtxremix.minecraft.asset.RemixTextureStore;
+ import com.nvidia.rtxremix.minecraft.benchmark.BenchmarkController;
+ import com.nvidia.rtxremix.minecraft.gl.GlInterop;
+ import com.nvidia.rtxremix.minecraft.gl.InteropHandles;
++import com.nvidia.rtxremix.minecraft.gl.InteropTextureDumper;
+ import com.nvidia.rtxremix.minecraft.light.LightManager;
+ import com.nvidia.rtxremix.minecraft.logic.ViewDistanceFade;
+ import com.nvidia.rtxremix.minecraft.profiling.PerformanceTimer;
+@@ -1253,6 +1254,10 @@ public class RemixRenderer {
+     
+             remixApi.setupCamera(worldCameraInfo);
+             remixApi.setupCamera(viewModelCameraInfo);
++            // Optional Linux diagnostics (REMIX_LINUX_DIAGNOSTICS=1): once-per-second submission summary.
++            if (InteropTextureDumper.ENABLED) {
++                diagLogOncePerSecond(pos, forwardX, forwardY, forwardZ);
++            }
+             float viewDistanceStrength = viewDistanceFade.layerStrength(ClientViewDistance.chunks());
+             updateCameraMedium(camera, pos, viewDistanceStrength, tickDelta);
+         } catch (RemixException e) {
+@@ -1323,8 +1328,29 @@ public class RemixRenderer {
+         }
+     }
+     
++    // Optional Linux diagnostics (REMIX_LINUX_DIAGNOSTICS=1): once-per-second submission summary.
++    private long diagLastLogNanos = 0;
++    private boolean diagSubmitCalled = false;
++    private boolean diagPresentCalled = false;
++
++    private void diagLogOncePerSecond(Vec3d pos, float fx, float fy, float fz) {
++        long now = System.nanoTime();
++        if (diagLastLogNanos != 0 && now - diagLastLogNanos < 1_000_000_000L) {
++            return;
++        }
++        diagLastLogNanos = now;
++        int lightCount = lightManager != null ? lightManager.getLightCount() : -1;
++        int chunkCount = chunkManager != null ? chunkManager.getLoadedChunkCount() : -1;
++        LOGGER.info(
++                "DIAG camera pos=({}, {}, {}) forward=({}, {}, {}) lights={} chunks={} submitCalled={} presentCalled={}",
++                pos.x, pos.y, pos.z, fx, fy, fz, lightCount, chunkCount, diagSubmitCalled, diagPresentCalled);
++        diagSubmitCalled = false;
++        diagPresentCalled = false;
++    }
++
+     private void submitFrame() {
+         remixApi.submit(null);
++        diagSubmitCalled = true;
+     }
+     
+     /**
+@@ -1336,6 +1362,7 @@ public class RemixRenderer {
+      */
+     public void presentFrameVk() {
+         boolean failed = false;
++        diagPresentCalled = true;
+         try {
+             try (ProfileScope ignored = ProfileScope.begin("Interop.GLToVK")) {
+                 blitGlToRemix();
+diff --git a/src/main/java/com/nvidia/rtxremix/minecraft/RtxRemixMod.java b/src/main/java/com/nvidia/rtxremix/minecraft/RtxRemixMod.java
+index bf3861f..b8b78ac 100644
+--- a/src/main/java/com/nvidia/rtxremix/minecraft/RtxRemixMod.java
++++ b/src/main/java/com/nvidia/rtxremix/minecraft/RtxRemixMod.java
+@@ -37,6 +37,7 @@ import com.nvidia.rtxremix.minecraft.input.RemixMouseAccess;
+ import com.nvidia.rtxremix.minecraft.input.RemixKeyboardAccess;
+ import com.nvidia.rtxremix.minecraft.input.RemixInputGate;
+ import com.nvidia.rtxremix.minecraft.gl.TextureOverlay;
++import com.nvidia.rtxremix.minecraft.gl.InteropTextureDumper;
+ import com.nvidia.rtxremix.minecraft.entity.CopperBeaconBlockEntityRenderer;
+ import com.nvidia.rtxremix.minecraft.camera.CameraController;
+ import com.nvidia.rtxremix.minecraft.camera.StillShot;
+@@ -683,6 +684,7 @@ public class RtxRemixMod implements ClientModInitializer {
+                 return;
+             }
+             mod.frameFailureLogged = false;
++            InteropTextureDumper.maybeDump(remixTexture);
+             if (remixTexture > 0 && mod.textureOverlay != null && isRtxEnabled()) {
+                 mod.textureOverlay.render(remixTexture);
+                 RemixWeatherRenderer weather = renderer.getWeatherRenderer();
+diff --git a/src/main/java/com/nvidia/rtxremix/minecraft/gl/InteropTextureDumper.java b/src/main/java/com/nvidia/rtxremix/minecraft/gl/InteropTextureDumper.java
+new file mode 100644
+index 0000000..429ee3a
+--- /dev/null
++++ b/src/main/java/com/nvidia/rtxremix/minecraft/gl/InteropTextureDumper.java
+@@ -0,0 +1,126 @@
++/*
++ * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++ * SPDX-License-Identifier: Apache-2.0
++ */
++package com.nvidia.rtxremix.minecraft.gl;
++
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++
++import java.io.FileOutputStream;
++import java.io.IOException;
++import java.nio.ByteBuffer;
++
++import static org.lwjgl.opengl.GL11.*;
++import static org.lwjgl.opengl.GL30.*;
++import static org.lwjgl.opengl.GL45.glGetTextureLevelParameteri;
++
++/**
++ * Optional Linux bring-up diagnostics, off unless {@code REMIX_LINUX_DIAGNOSTICS=1}:
++ * dumps the Remix interop color texture to PPM files at 30 s, 2 min and 5 min
++ * after it first appears, so Remix's raw output can be inspected independently
++ * of whatever composites it on screen. Files go to {@code REMIX_LINUX_DIAG_DIR},
++ * default {@code remix-diagnostics/} in the game directory. RemixRenderer also
++ * logs a once-per-second submission summary while enabled.
++ */
++public final class InteropTextureDumper {
++    private static final Logger LOGGER = LoggerFactory.getLogger(InteropTextureDumper.class);
++    /** Whether the Linux diagnostics are on for this process. */
++    public static final boolean ENABLED = "1".equals(System.getenv("REMIX_LINUX_DIAGNOSTICS"));
++    private static final String DUMP_DIR = System.getenv("REMIX_LINUX_DIAG_DIR") != null
++            ? System.getenv("REMIX_LINUX_DIAG_DIR") : "remix-diagnostics";
++    private static final long[] SCHEDULE_NANOS = { 30_000_000_000L, 120_000_000_000L, 300_000_000_000L };
++    private static long firstSeenNanos = 0;
++    private static int nextScheduleIndex = 0;
++
++    private InteropTextureDumper() {}
++
++    /**
++     * Call once per frame with the current Remix output texture; dumps at each point in
++     * SCHEDULE_NANOS after the texture first appears (NOT frame count: startup can run at very
++     * low FPS while shaders compile and large textures stream in synchronously, so a
++     * frame-count-based delay can fire mid-stall and catch a transient black frame).
++     */
++    public static void maybeDump(int textureId) {
++        if (!ENABLED || nextScheduleIndex >= SCHEDULE_NANOS.length || textureId <= 0) {
++            return;
++        }
++        long now = System.nanoTime();
++        if (firstSeenNanos == 0) {
++            firstSeenNanos = now;
++        }
++        if (now - firstSeenNanos < SCHEDULE_NANOS[nextScheduleIndex]) {
++            return;
++        }
++        int index = nextScheduleIndex;
++        nextScheduleIndex++;
++        try {
++            java.nio.file.Files.createDirectories(java.nio.file.Path.of(DUMP_DIR));
++            dump(textureId, java.nio.file.Path.of(DUMP_DIR, "interop-dump-" + (index + 1) + ".ppm").toString());
++        } catch (Exception e) {
++            LOGGER.error("InteropTextureDumper: dump failed", e);
++        }
++    }
++
++    private static void dump(int textureId, String path) throws IOException {
++        // DSA variant: operates on the named texture directly, no bind required
++        // (glGetTexLevelParameteri reads whatever happens to be bound to GL_TEXTURE_2D,
++        // which at this call site -- before TextureOverlay binds this texture -- is not it).
++        int width = glGetTextureLevelParameteri(textureId, 0, GL_TEXTURE_WIDTH);
++        int height = glGetTextureLevelParameteri(textureId, 0, GL_TEXTURE_HEIGHT);
++        if (width <= 0 || height <= 0) {
++            LOGGER.error("InteropTextureDumper: bad texture size {}x{}", width, height);
++            return;
++        }
++
++        int fbo = glGenFramebuffers();
++        int prevReadFbo = glGetInteger(GL_READ_FRAMEBUFFER_BINDING);
++        int prevDrawFbo = glGetInteger(GL_DRAW_FRAMEBUFFER_BINDING);
++        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
++        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textureId, 0);
++        int status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
++        if (status != GL_FRAMEBUFFER_COMPLETE) {
++            LOGGER.error("InteropTextureDumper: FBO incomplete, status=0x{}", Integer.toHexString(status));
++            glBindFramebuffer(GL_READ_FRAMEBUFFER, prevReadFbo);
++            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, prevDrawFbo);
++            glDeleteFramebuffers(fbo);
++            return;
++        }
++
++        ByteBuffer pixels = ByteBuffer.allocateDirect(width * height * 4);
++        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
++
++        glBindFramebuffer(GL_READ_FRAMEBUFFER, prevReadFbo);
++        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, prevDrawFbo);
++        glDeleteFramebuffers(fbo);
++
++        long sum = 0;
++        int min = 255, max = 0;
++        for (int i = 0; i < width * height * 4; i += 4) {
++            for (int c = 0; c < 3; c++) {
++                int v = pixels.get(i + c) & 0xFF;
++                sum += v;
++                if (v < min) min = v;
++                if (v > max) max = v;
++            }
++        }
++        double avg = (double) sum / ((double) width * height * 3);
++        LOGGER.info("InteropTextureDumper: texture={} {}x{} avg={} min={} max={}",
++                textureId, width, height, avg, min, max);
++
++        try (FileOutputStream out = new FileOutputStream(path)) {
++            out.write(("P6\n" + width + " " + height + "\n255\n").getBytes());
++            byte[] row = new byte[width * 3];
++            for (int y = height - 1; y >= 0; y--) {
++                for (int x = 0; x < width; x++) {
++                    int srcIndex = (y * width + x) * 4;
++                    row[x * 3] = pixels.get(srcIndex);
++                    row[x * 3 + 1] = pixels.get(srcIndex + 1);
++                    row[x * 3 + 2] = pixels.get(srcIndex + 2);
++                }
++                out.write(row);
++            }
++        }
++        LOGGER.info("InteropTextureDumper: wrote {}", path);
++    }
++}
+-- 
+2.43.0
+

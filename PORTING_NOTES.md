@@ -890,3 +890,63 @@ container (stubbed GL, real bridge). **Nothing here has run on the GPU.**
 - `GlInterop`, `InteropHandles` and `LinuxPresent` compile against the API stubs. `RemixRenderer` (3 added lines)
   could not be compiled here.
 - Both patch series apply cleanly from their pins (runtime 12, mod 4) and match the trees I built.
+
+## Phase D step 8: first verified frame; live-test patches folded in (2026-10-29)
+
+**Status: verified on GPU (by Kush, RTX 5070, 2026-10-28): a path-traced frame reaches the game through the FD
+interop.**
+- With `RTX_ENABLE_ASYNC_COMPILATION=0`, in the Creative "New World" save, the interop color texture was dumped
+  through the real GL import path at 30 s, 2 min and 5 min after it first appeared:
+
+  | dump | avg | min | max | size |
+  |---|---|---|---|---|
+  | 1 (30 s) | 13.24 | 0 | 142 | 1253×1352 |
+  | 2 (2 min) | 88.94 | 0 | 255 | 1253×1352 |
+  | 3 (5 min) | 93.01 | 0 | 248 | 1253×1352 |
+
+- All three show path-traced geometry, consistent with the on-screen screenshots (the dumps are Y-flipped relative
+  to the screen).
+- Evidence: `evidence/fix-verify-2026-10-28/`, holding `interop-dump-{1,2,3}.{ppm,png}`,
+  `screenshot-{30s,2min,5min}.png` and `minecraft-latest.log` (the full run).
+- The investigation before the fix is in `evidence/live-test-2026-10-26/`: screenshots, jstacks, log tails, and the
+  `sonnet-bisect-*` debug-clear bisection.
+
+**What fixed the black image** (mod patch 0005, Kush's commit, kept as is):
+- `InteropHandles.importMemory` now sets `GL_DEDICATED_MEMORY_OBJECT_EXT = GL_TRUE` before `glImportMemoryFdEXT`.
+  The exported Vulkan image is a dedicated allocation, the GL spec leaves the import undefined without the flag, and
+  `tests/interop_gl.c` sets it.
+- The same patch guards `RemixWeatherRenderer` against the missing depth image (see KNOWN_GAPS).
+
+**Series housekeeping (this step; no GPU run):**
+- **Mod series:** `0001`–`0004` are unchanged, apart from the `gradlew` fix in `0003`. `0005` is the
+  dedicated-memory and weather fix.
+- **Diagnostics:** the two live-test diagnostic patches (interop texture dumper, per-second submission log) are
+  squashed into `patches/rtx-remix-minecraft/optional/0006`.
+  - They are **off by default** on two levels. `install.sh` applies the patch only with `--diagnostics`, and the
+    code runs only with `REMIX_LINUX_DIAGNOSTICS=1`.
+  - Dumps go to `REMIX_LINUX_DIAG_DIR` (default `<game dir>/remix-diagnostics/`) instead of a fixed `/mnt/big`
+    path, and success messages log at info.
+  - Checked here: both variants (5 and 6 patches) apply from the pin and match the built trees.
+- **`gradlew` (patch 0003):** the generated script ran `java -jar gradle-wrapper.jar`, but the pinned wrapper jar
+  has no `Main-Class` entry, so it failed with "no main manifest attribute".
+  - It now puts the jar on `CLASSPATH` and runs `org.gradle.wrapper.GradleWrapperMain`.
+  - Checked here: the old script fails with exactly that error. The fixed one starts the wrapper, downloads Gradle
+    9.3.1 (checked against the pinned SHA-256) and prints "Welcome to Gradle 9.3.1!".
+  - The wrapper jar SHA pin is unchanged.
+- **`install.sh`:** Prism's WrapperCommand did not reach the game's environment (`/proc/<pid>/environ`).
+  - `install.sh` now clears WrapperCommand and writes `~/.local/bin/remix-minecraft` (`--launcher` to change it).
+    The script exports `DXVK_REMIX_NVIDIA_MIN_DRIVER=600`, `RTX_ENABLE_ASYNC_COMPILATION=0`, the PRIME variables
+    (`__NV_PRIME_RENDER_OFFLOAD=1`, `__GLX_VENDOR_LIBRARY_NAME=nvidia`, `__VK_LAYER_NV_optimus=NVIDIA_only`;
+    `--no-prime` drops them) and, on request, the NGX and diagnostics switches. It then runs
+    `prismlauncher -l rtx-remix-linux`.
+  - It refuses to start while Prism is already running: `-l` would hand the launch to the running process, without
+    this environment.
+  - Checked here: a dry run against a temporary Prism directory, with a stand-in `prismlauncher` that printed the
+    environment and arguments it received.
+
+**Known gaps after the first frame:**
+- **Rain and weather** need depth interop, which is not there yet.
+- **NRD is not built**, and NGX is off, so there is no NRD or DLSS-RR denoising.
+- **`glFinish` on every frame** orders GL reads before the runtime's next blit.
+- **Colour space, exposure and texture correctness are unverified.** An earlier run reported missing, transparent
+  textures; it has not been re-checked since the fix.

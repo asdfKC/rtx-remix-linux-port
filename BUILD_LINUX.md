@@ -63,7 +63,11 @@ scripts/install.sh --work /mnt/big/rtx-remix-linux
    mod's JVM arguments, 2 GiB heap, and `DXVK_REMIX_NVIDIA_MIN_DRIVER=600` through a wrapper command.
 6. Copies the mod JAR and Fabric API into its `mods/`.
 
-Close Prism before running it. `--skip-tests` skips the unit tests, and `--help` lists the other options.
+It also writes `~/.local/bin/remix-minecraft`, which exports the game's environment and runs
+`prismlauncher -l rtx-remix-linux`. Start the game with it, not from Prism's window: Prism's WrapperCommand did not
+pass environment variables to the game. `--diagnostics` adds the optional interop dumps.
+
+Close Prism before running `install.sh` or the launch script. `--skip-tests` skips the unit tests, and `--help` lists the other options.
 
 ## 4. Not yet covered
 
