@@ -1,0 +1,115 @@
+=== Baseline view ===
+Coords: 0.5 80.0 0.5  facing south (yaw=0 pitch=0)
+Time: day (1000), weather: clear, cycles off
+F3: 77 fps, T:120 vsync fabulous, GPU: 56%
+Display: 2518x1352, NVIDIA GeForce RTX 5070, driver 615.78.08
+
+=== nvidia-smi dmon ===
+# gpu    pwr  gtemp  mtemp     sm    mem    enc    dec    jpg    ofa   mclk   pclk     fb   bar1   ccpm 
+# Idx      W      C      C      %      %      %      %      %      %    MHz    MHz     MB     MB     MB 
+    0    133     56      -     69     30      0      0      0      0  14001   2910   3347   3680      0 
+    0    133     56      -     68     30      0      0      0      0  14001   2917   3347   3680      0 
+    0    131     57      -     70     31      0      0      0      0  14001   2917   3347   3680      0 
+    0    133     57      -     70     31      0      0      0      0  14001   2917   3347   3680      0 
+    0    133     56      -     68     29      0      0      0      0  14001   2917   3347   3680      0 
+    0    132     56      -     70     30      0      0      0      0  14001   2917   3347   3680      0 
+    0    132     56      -     67     29      0      0      0      0  14001   2917   3347   3680      0 
+    0    132     56      -     68     30      0      0      0      0  14001   2910   3347   3680      0 
+    0    132     56      -     68     29      0      0      0      0  14001   2910   3347   3680      0 
+    0    133     56      -     68     30      0      0      0      0  14001   2917   3347   3680      0 
+    0    132     56      -     67     29      0      0      0      0  14001   2917   3347   3680      0 
+    0    132     57      -     67     30      0      0      0      0  14001   2910   3347   3680      0 
+    0    133     57      -     69     30      0      0      0      0  14001   2910   3347   3680      0 
+    0    133     56      -     69     30      0      0      0      0  14001   2910   3347   3680      0 
+    0    133     57      -     70     30      0      0      0      0  14001   2910   3347   3680      0 
+# gpu    pwr  gtemp  mtemp     sm    mem    enc    dec    jpg    ofa   mclk   pclk     fb   bar1   ccpm 
+# Idx      W      C      C      %      %      %      %      %      %    MHz    MHz     MB     MB     MB 
+    0    131     56      -     68     29      0      0      0      0  14001   2917   3347   3680      0 
+    0    133     56      -     68     29      0      0      0      0  14001   2910   3347   3680      0 
+    0    133     56      -     68     30      0      0      0      0  14001   2910   3347   3680      0 
+    0    133     57      -     69     30      0      0      0      0  14001   2910   3347   3680      0 
+    0    133     57      -     68     29      0      0      0      0  14001   2910   3347   3680      0 
+    0    133     56      -     68     29      0      0      0      0  14001   2910   3347   3680      0 
+    0    132     56      -     68     29      0      0      0      0  14001   2917   3347   3680      0 
+    0    132     56      -     67     29      0      0      0      0  14001   2910   3347   3680      0 
+    0    129     57      -     67     29      0      0      0      0  14001   2917   3347   3680      0 
+    0    129     57      -     63     27      0      0      0      0  14001   2910   3347   3680      0 
+    0    131     58      -     67     29      0      0      0      0  14001   2910   3347   3680      0 
+    0    133     56      -     67     29      0      0      0      0  14001   2910   3347   3680      0 
+    0    132     56      -     68     29      0      0      0      0  14001   2910   3347   3680      0 
+    0    132     58      -     70     31      0      0      0      0  14001   2910   3347   3680      0 
+    0    133     58      -     71     31      0      0      0      0  14001   2917   3347   3680      0 
+
+=== top -H (threads) ===
+top - 21:33:55 up 2 days,  3:51,  1 user,  load average: 5.44, 3.58, 2.35
+Threads: 81 total, 3 running, 78 sleep, 0 d-sleep, 0 stopped, 0 zombie
+%Cpu(s): 38.8 us,  6.1 sy,  0.0 ni, 54.5 id,  0.0 wa,  0.6 hi,  0.0 si,  0.0 st 
+MiB Mem :  31187.1 total,   2738.5 free,  20577.4 used,   8673.8 buff/cache     
+MiB Swap:  20480.0 total,  13513.4 free,   6966.6 used.  10609.6 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+1781377 kushcool  20   0   21.8g   4.6g   2.0g R  99.1  15.2   3:52.64 dxvk-de+
+1781376 kushcool  20   0   21.8g   4.6g   2.0g R  94.1  15.2   3:52.67 dxvk-de+
+1781247 kushcool  20   0   21.8g   4.6g   2.0g S  64.4  15.2   1:27.48 Render +
+1781326 kushcool  20   0   21.8g   4.6g   2.0g S  54.5  15.2   1:08.11 Render +
+1781373 kushcool  20   0   21.8g   4.6g   2.0g R  29.7  15.2   0:34.54 dxvk-cs
+1782786 kushcool  20   0   21.8g   4.6g   2.0g S   9.9  15.2   0:12.10 Server +
+1781246 kushcool  20   0   21.8g   4.6g   2.0g S   0.0  15.2   0:00.00 java
+1781248 kushcool  20   0   21.8g   4.6g   2.0g S   0.0  15.2   0:00.22 GC Thre+
+1781249 kushcool  20   0   21.8g   4.6g   2.0g S   0.0  15.2   0:00.00 G1 Main+
+1781250 kushcool  20   0   21.8g   4.6g   2.0g S   0.0  15.2   0:02.19 G1 Conc+
+1781251 kushcool  20   0   21.8g   4.6g   2.0g S   0.0  15.2   0:00.05 G1 Refi+
+1781252 kushcool  20   0   21.8g   4.6g   2.0g S   0.0  15.2   0:00.00 G1 Serv+
+1781253 kushcool  20   0   21.8g   4.6g   2.0g S   0.0  15.2   0:00.01 VM Peri+
+
+=== jstack samples (Render thread, top 6 frames, 1s apart) ===
+--- sample 1 ---
+"Render thread" #1 [1781247] prio=10 os_prio=0 cpu=99482.86ms elapsed=269.91s tid=0x00007facd402d0f0 nid=1781247 runnable  [0x00007facd87fe000]
+   java.lang.Thread.State: RUNNABLE
+	at com.nvidia.rtxremix.RemixBridge.present(Native Method)
+	at com.nvidia.rtxremix.RemixAPI.present(RemixAPI.java:181)
+	at com.nvidia.rtxremix.minecraft.RemixRenderer.presentFrameVk(RemixRenderer.java:1356)
+	at com.mojang.blaze3d.systems.RenderSystem.redirect$bai000$rtx-remix-renderer$rtxremix$redirectSwapBuffers(RenderSystem.java:991)
+--- sample 2 ---
+"Render thread" #1 [1781247] prio=10 os_prio=0 cpu=100179.88ms elapsed=270.98s tid=0x00007facd402d0f0 nid=1781247 runnable  [0x00007facd87fe000]
+   java.lang.Thread.State: RUNNABLE
+	at org.lwjgl.opengl.GL11C.glFinish(Native Method)
+	at org.lwjgl.opengl.GL11.glFinish(GL11.java:2300)
+	at com.nvidia.rtxremix.minecraft.gl.GlInterop.beforeRemixPresent(GlInterop.java:169)
+	at com.nvidia.rtxremix.minecraft.RemixRenderer.presentFrameVk(RemixRenderer.java:1354)
+--- sample 3 ---
+"Render thread" #1 [1781247] prio=10 os_prio=0 cpu=100869.83ms elapsed=272.06s tid=0x00007facd402d0f0 nid=1781247 runnable  [0x00007facd87fe000]
+   java.lang.Thread.State: RUNNABLE
+	at com.nvidia.rtxremix.RemixBridge.present(Native Method)
+	at com.nvidia.rtxremix.RemixAPI.present(RemixAPI.java:181)
+	at com.nvidia.rtxremix.minecraft.RemixRenderer.presentFrameVk(RemixRenderer.java:1356)
+	at com.mojang.blaze3d.systems.RenderSystem.redirect$bai000$rtx-remix-renderer$rtxremix$redirectSwapBuffers(RenderSystem.java:991)
+--- sample 4 ---
+"Render thread" #1 [1781247] prio=10 os_prio=0 cpu=101585.03ms elapsed=273.15s tid=0x00007facd402d0f0 nid=1781247 runnable  [0x00007facd87fe000]
+   java.lang.Thread.State: RUNNABLE
+	at org.lwjgl.opengl.GL11C.glFinish(Native Method)
+	at org.lwjgl.opengl.GL11.glFinish(GL11.java:2300)
+	at com.nvidia.rtxremix.minecraft.gl.GlInterop.beforeRemixPresent(GlInterop.java:169)
+	at com.nvidia.rtxremix.minecraft.RemixRenderer.presentFrameVk(RemixRenderer.java:1354)
+--- sample 5 ---
+"Render thread" #1 [1781247] prio=10 os_prio=0 cpu=102294.88ms elapsed=274.22s tid=0x00007facd402d0f0 nid=1781247 runnable  [0x00007facd87fe000]
+   java.lang.Thread.State: RUNNABLE
+	at org.lwjgl.opengl.GL11C.glFinish(Native Method)
+	at org.lwjgl.opengl.GL11.glFinish(GL11.java:2300)
+	at com.nvidia.rtxremix.minecraft.gl.GlInterop.beforeRemixPresent(GlInterop.java:169)
+	at com.nvidia.rtxremix.minecraft.RemixRenderer.presentFrameVk(RemixRenderer.java:1354)
+
+=== remix-dxvk.log key lines ===
+[21:29:50.862] err:   Unable to load NRD, this feature will be disabled
+[21:29:50.862] info:  NGX (DLSS) is off on Linux; set REMIX_LINUX_ENABLE_NGX=1 to try it
+[21:29:50.894] info:  NVIDIA architecture detected, setting default raytrace modes to Trace Ray (Indirect Integrate) and Ray Query (GBuffer, Direct Integrate)
+[21:29:50.894] info:  NVIDIA Turing architecture detected, setting default graphics settings to Low
+
+=== Analysis ===
+GPU sm util ~67-70%, power ~132W (not saturated). Native dxvk-device threads
+(tid 1781376, 1781377) pegged at 94-99% CPU each -- CPU-bound, not GPU-bound.
+jstack of Java Render thread: 3/5 samples in glFinish (GlInterop.beforeRemixPresent:169),
+2/5 in RemixBridge.present native call. Confirms hypothesis (a) from the task brief:
+the mod's per-frame glFinish() in beforeRemixPresent serializes CPU against GPU and
+is the dominant cost on the Render thread, consistent with 77fps/56-70%GPU ceiling
+despite vsync target of 120.
