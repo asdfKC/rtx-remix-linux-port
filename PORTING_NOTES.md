@@ -962,3 +962,30 @@ interop.**
   a fixed view/preset (58 -> 92 fps), GPU now the bottleneck instead of the CPU stall.
 - **Colour space, exposure and texture correctness are unverified.** An earlier run reported missing, transparent
   textures; it has not been re-checked since the fix.
+
+## `look-and-run` session (2026-10-30): DLSS crash root-caused, clouds, shadows
+
+- **DLSS/NGX crash: root cause found and fixed.** The JVM's Render thread gets a ~1MB default
+  stack on Linux, too small for NGX's init call (confirmed by shrinking the standalone repro's
+  own `ulimit -s`: crashes under ~2MB, at the identical `libnvidia-ngx.so.1 +0xc3505` offset as
+  the real game). A second bug had hidden the obvious fix (`-Xss8m`) in every earlier session:
+  Prism's `AutomaticJava=true` instance setting silently ignores `JavaPath`/`JvmArgs` at launch,
+  so no custom JVM args -- not this fix, not the pre-existing G1GC flags -- were ever actually
+  applied. `scripts/install.sh` now adds `-Xss8m` and always sets `AutomaticJava=false`. Verified
+  on the GPU: the game now reaches the main menu and loads a world with NGX enabled, where it
+  crashed deterministically every time before. **New blocker found, not solved**: once gameplay
+  starts with DLSS active, the Render thread stops presenting frames (GPU 0%, native `present`
+  never returns); does not reproduce with DLSS off. See
+  `evidence/look-and-run/job1-dlss-stack-fix.md`.
+- **Clouds act as opaque sun blockers.** Traced to the mod's cloud material
+  (`MaterialInfoOpaqueEXT` + a small-radius subsurface-scattering extension) -- shared upstream
+  Remix material code, not a Linux gap. Mitigated (not fixed): `scripts/install.sh` now ships
+  `renderClouds:"false"` by default (never overriding an existing choice). See
+  `evidence/look-and-run/job2-clouds-sun-blocker.md`.
+- **Shadowed vertical surfaces render very dark** (pyramid risers, tree undersides). Directly
+  ruled out NRD and DLSS-RR-oriented sparse rendering as the sole cause with one-variable-at-a-
+  time tests; neither recovers a historical "before NRD" baseline brightness. Not solved --
+  recommended next step is bisecting `rtx.conf`/runtime changes between sessions. See
+  `evidence/look-and-run/job3-nrd-black-shadows.md`.
+- **`REMIX_LINUX_COLOR_UNORM_AS_SRGB=1` tested, not adopted** -- makes mid-tones more saturated,
+  not less. See `evidence/look-and-run/job4-color-exposure.md`.

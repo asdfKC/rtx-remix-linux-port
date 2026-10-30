@@ -3,14 +3,13 @@
 Work-in-progress native Linux (x86_64, no Wine/Proton) port of NVIDIA RTX Remix for Minecraft:
 the public dxvk-remix runtime, built headless on Linux, plus the Fabric mod's JNI/Java side.
 
-**Status: first path-traced frame verified on GPU** (RTX 5070, driver 615.78.08, 2026-10-28, by Kush). In the
-Creative "New World" save, the interop color texture dumped through the real GL import path shows path-traced
-geometry (tree, dug-out pit, grass, soft shadows, GI) at 30 s, 2 min and 5 min after it first appeared, matching
-the on-screen screenshots. Evidence: `evidence/fix-verify-2026-10-28/`; the investigation that led there is in
-`evidence/live-test-2026-10-26/`.
-
-That is all that is verified so far. Not verified: colour space, exposure, texture correctness, weather,
-performance. See `KNOWN_GAPS.md` and `PORTING_NOTES.md`.
+**Status: runs and renders in the real game on an RTX 5070** (driver 615.78.08, verified 2026-10-28 through
+2026-10-30, by Kush). Ultra preset, 92 fps / GPU 99-100% at a fixed test view with NRD denoising off, 81 fps / GPU
+82% with NRD on. The DLSS/NGX startup crash is root-caused and fixed (see `KNOWN_GAPS.md`), but DLSS is still off
+by default: enabling it now gets past the crash but hangs once gameplay starts, not yet solved. Clouds are off by
+default (mitigation for a visual bug, see `KNOWN_GAPS.md`). Colour space, exposure, and some shadowed-area darkness
+issues remain unverified/unsolved. See `KNOWN_GAPS.md` and `PORTING_NOTES.md` for the full picture, and
+`evidence/look-and-run/` for the most recent session's screenshots and findings.
 
 Status words: *configures* / *compiles* / *links* / *runs on lavapipe* / *unit tests pass* / *verified on GPU*.
 Only the user, with logs or captures from the GPU, can mark something *verified on GPU*.
