@@ -181,10 +181,14 @@ set_cfg() {
 # JVM arguments: the mod's RECOMMENDED_JVM_ARGS from packaging/installer.ps1 (the
 # repository's single source for them), without heap sizes, which Prism sets from
 # its memory settings instead. -Xmx2G becomes MaxMemAlloc=2048, as on Windows.
-JVM_ARGS="-XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M -XX:HeapDumpPath=MojangTricksIntelDriversForPerformance_javaw.exe_minecraft.exe.heapdump"
+# -Xss8m is this port's own addition: the JVM's default thread stack (~1MB on Linux) is too
+# small for NVIDIA's NGX (DLSS) init call, which segfaults inside the driver's
+# libnvidia-ngx.so with a stack under ~2MB (see evidence/look-and-run/job1-dlss-stack-fix.md).
+JVM_ARGS="-XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M -XX:HeapDumpPath=MojangTricksIntelDriversForPerformance_javaw.exe_minecraft.exe.heapdump -Xss8m"
 if [ -f "$MOD_DIR/packaging/installer.ps1" ]; then
   from_installer=$(sed -n "s/^\$script:RECOMMENDED_JVM_ARGS = '\(.*\)'.*/\1/p" "$MOD_DIR/packaging/installer.ps1")
   [ -n "$from_installer" ] && JVM_ARGS=$(printf '%s\n' $from_installer | grep -v -e '^-Xmx' -e '^-Xms' | paste -sd' ')
+  JVM_ARGS="$JVM_ARGS -Xss8m"
 fi
 set_cfg OverrideJavaLocation true
 set_cfg JavaPath "$JAVA_HOME_21/bin/java"
@@ -193,6 +197,11 @@ set_cfg JvmArgs "$JVM_ARGS"
 set_cfg OverrideMemory true
 set_cfg MinMemAlloc 512
 set_cfg MaxMemAlloc 2048
+# Prism's "AutomaticJava" instance option, when true, silently ignores JavaPath/JvmArgs/
+# memory settings above and re-detects its own Java + default flags at launch time -- the
+# custom JvmArgs (including -Xss8m) were never actually passed to the game process until this
+# was set. Must come after the set_cfg calls above since it lives in a different ini section.
+set_cfg AutomaticJava false
 # Earlier versions of this script set the environment through WrapperCommand, which did not reach the
 # game. Clear it; the launch script below sets the environment instead.
 set_cfg OverrideCommands false
