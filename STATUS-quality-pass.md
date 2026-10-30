@@ -117,7 +117,7 @@ Evidence: `evidence/quality-pass/dlss-investigation.md`.
 | 1: Graphics preset | fixed, verified | Turing/Low (misdetected) | Blackwell/Ultra (correct) | `phase1.txt` | `9b851ab` |
 | 2: glFinish stall | fixed, verified | 58fps, GPU 71-75% | **92fps, GPU 99-100% (+59%)** | `phase2.txt` | `be2ad8e` |
 | 3: NRD denoiser | blocked (sudo) | grainy, no denoiser | unchanged | `phase3-nrd-blocked.md` | `94cfa4f` |
-| 4: DLSS/NGX | investigated, not solved | crashes | crashes (root cause isolated to driver) | `dlss-investigation.md` | (this commit) |
+| 4: DLSS/NGX | investigated, not solved | crashes | crashes (root cause isolated to driver) | `dlss-investigation.md` | `530842b` |
 
 ## Next step
 Phase 3 needs one interactive `sudo pacman -S directx-shader-compiler`, then the build steps in
