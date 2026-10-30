@@ -78,7 +78,17 @@ panning the camera show no tearing or corruption.
 
 Evidence: `evidence/quality-pass/phase2.txt`, `phase2_fixed_screenshot.png`, `phase2_dmon.txt`.
 
-## Phase 3: NRD denoiser — NOT STARTED
+## Phase 3: NRD denoiser — BLOCKED (needs one interactive sudo command)
+
+Researched fully; no code changes needed for the runtime side (it already dlopen()s `libNRD.so`
+correctly and version-checks cleanly against this machine's NRD 4.13.0 checkout via a symlinked
+header — see `evidence/quality-pass/phase3-nrd-blocked.md`). The only blocker is that building NRD
+needs a DXC binary with SPIR-V output, which Arch ships officially as `extra/directx-shader-compiler`
+but installing it needs `sudo pacman -S directx-shader-compiler` — an interactive password prompt
+this unattended session cannot supply (`sudo: a password is required`).
+
+**To finish Phase 3**: run `sudo pacman -S directx-shader-compiler` once, interactively, then see
+the exact CMake/build/wire-up steps in `evidence/quality-pass/phase3-nrd-blocked.md`.
 
 ## Phase 4: DLSS investigation — NOT STARTED
 
