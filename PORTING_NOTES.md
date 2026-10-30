@@ -950,11 +950,13 @@ interop.**
 
 **Known gaps after the first frame:**
 - **Rain and weather** need depth interop, which is not there yet.
-- **NRD is not built** (quality pass: researched fully, blocked only on one interactive
-  `sudo pacman -S directx-shader-compiler` -- see `evidence/quality-pass/phase3-nrd-blocked.md`),
-  and **NGX crashes deterministically** inside the closed-source driver when force-enabled (quality
-  pass: extension list and library version ruled out as causes -- see
-  `evidence/quality-pass/dlss-investigation.md`), so there is still no NRD or DLSS-RR denoising.
+- **NRD is built and shipped** (nrd-dlss session: `libNRD.so` builds from source and loads
+  cleanly, visibly reducing shadow grain at ~12% fps cost -- see `evidence/nrd-dlss/nrd-built.md`).
+  **NGX still crashes deterministically** inside the closed-source driver when force-enabled; a
+  minimal standalone repro matching the real call in detail does not reproduce it, narrowing the
+  cause to something specific to dxvk-remix's actual process rather than a bare driver bug --
+  see `evidence/nrd-dlss/ngx-bug-report.md`. Still no DLSS-RR denoising; NRD covers the
+  non-DLSS path.
 - ~~`glFinish` on every frame orders GL reads before the runtime's next blit~~ -- **fixed** in the
   quality pass (patches `0014`/`0006`): the runtime now waits on `clientDone` instead. +59% fps at
   a fixed view/preset (58 -> 92 fps), GPU now the bottleneck instead of the CPU stall.
