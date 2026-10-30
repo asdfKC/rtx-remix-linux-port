@@ -866,8 +866,12 @@ container (stubbed GL, real bridge). **Nothing here has run on the GPU.**
   `GL_TEXTURE_TILING_EXT = GL_OPTIMAL_TILING_EXT` is set on the texture.
 - **Waits:** `dxvkDone` is waited once per Remix Present, and only after an image was imported. A signal that no
   frame waited on is consumed before the next Present, so the runtime never signals a signalled binary semaphore.
-- **Signals:** `clientDone` is never signalled, because the runtime never waits on it. `glFinish` runs before each
-  Present, so GL's reads of the image finish before the runtime blits into it again.
+- **Signals (fixed in the quality pass, see `evidence/quality-pass/phase2.txt`):** `clientDone` is now signalled
+  every frame in `signalDone()`, and the runtime waits on it before each blit into the interop image (skipped only
+  on the first blit of each image's lifetime, when nothing has signalled yet -- `m_interopNeedsClientDoneWait` in
+  `d3d9_swapchain_external.cpp`). `glFinish` is gone from `beforeRemixPresent`; ordering is enforced GPU-side
+  instead of with a CPU stall. Measured on an RTX 5070 at a fixed view/preset: 58fps/GPU 71-75% -> 92fps/GPU
+  99-100% (+59%), GPU now the actual bottleneck. Patches `0014` (runtime) + `0006` (mod).
 - **No GL→interop copy:** the runtime overwrites the image at Present, and GLFW presents the GL frame.
 
 **Timing: fixed in the mod, the less invasive option.** No runtime change:
@@ -946,7 +950,13 @@ interop.**
 
 **Known gaps after the first frame:**
 - **Rain and weather** need depth interop, which is not there yet.
-- **NRD is not built**, and NGX is off, so there is no NRD or DLSS-RR denoising.
-- **`glFinish` on every frame** orders GL reads before the runtime's next blit.
+- **NRD is not built** (quality pass: researched fully, blocked only on one interactive
+  `sudo pacman -S directx-shader-compiler` -- see `evidence/quality-pass/phase3-nrd-blocked.md`),
+  and **NGX crashes deterministically** inside the closed-source driver when force-enabled (quality
+  pass: extension list and library version ruled out as causes -- see
+  `evidence/quality-pass/dlss-investigation.md`), so there is still no NRD or DLSS-RR denoising.
+- ~~`glFinish` on every frame orders GL reads before the runtime's next blit~~ -- **fixed** in the
+  quality pass (patches `0014`/`0006`): the runtime now waits on `clientDone` instead. +59% fps at
+  a fixed view/preset (58 -> 92 fps), GPU now the bottleneck instead of the CPU stall.
 - **Colour space, exposure and texture correctness are unverified.** An earlier run reported missing, transparent
   textures; it has not been re-checked since the fix.

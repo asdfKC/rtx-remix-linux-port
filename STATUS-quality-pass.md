@@ -90,8 +90,37 @@ this unattended session cannot supply (`sudo: a password is required`).
 **To finish Phase 3**: run `sudo pacman -S directx-shader-compiler` once, interactively, then see
 the exact CMake/build/wire-up steps in `evidence/quality-pass/phase3-nrd-blocked.md`.
 
-## Phase 4: DLSS investigation — NOT STARTED
+## Phase 4: DLSS/NGX crash investigation — INVESTIGATED, not solved (time-boxed)
+
+Deterministic repro confirmed (identical crash offset in `libnvidia-ngx.so.1` across 3 separate
+runs). Ruled out this session with direct evidence:
+- Missing required Vulkan extensions — probed `NVSDK_NGX_VULKAN_RequiredExtensions` directly
+  against the system driver library; all 5 required extensions (1 instance, 4 device) confirmed
+  present in the actual enabled-extensions log from a crash run.
+- Wrong/stale NGX library — confirmed the exact driver-matched `libnvidia-ngx.so.615.78.08` loads,
+  no `LD_LIBRARY_PATH` pollution from Steam/Flatpak NVIDIA runtimes present on this machine.
+- NGX's own internal diagnostic — forced `NVSDK_NGX_LOGGING_LEVEL_VERBOSE` on (investigation-only,
+  reverted before commit), reproduced the crash again: zero log lines from NGX before the fault,
+  meaning it crashes before NGX's own logging subsystem is live.
+
+Root cause is inside NVIDIA's closed-source driver, unresolvable further without NVIDIA's own
+debug symbols or a minimal standalone repro project (recommended next step, see the doc). NGX
+stays off by default, matching the already-documented behavior. No patch filed.
+
+Evidence: `evidence/quality-pass/dlss-investigation.md`.
+
+## Summary table
+
+| Phase | Status | Before | After | Evidence | Commit |
+|---|---|---|---|---|---|
+| 0: Baseline | measured | — | 77fps, GPU 56-70%, glFinish dominant | `baseline.txt` | `7f538c0` |
+| 1: Graphics preset | fixed, verified | Turing/Low (misdetected) | Blackwell/Ultra (correct) | `phase1.txt` | `9b851ab` |
+| 2: glFinish stall | fixed, verified | 58fps, GPU 71-75% | **92fps, GPU 99-100% (+59%)** | `phase2.txt` | `be2ad8e` |
+| 3: NRD denoiser | blocked (sudo) | grainy, no denoiser | unchanged | `phase3-nrd-blocked.md` | `94cfa4f` |
+| 4: DLSS/NGX | investigated, not solved | crashes | crashes (root cause isolated to driver) | `dlss-investigation.md` | (this commit) |
 
 ## Next step
-Phase 3 (NRD denoiser) — the grain is still present (not addressed by Phases 1-2); next highest
-value. Phase 4 (DLSS) is time-boxed and only attempted if budget remains after Phase 3.
+Phase 3 needs one interactive `sudo pacman -S directx-shader-compiler`, then the build steps in
+`evidence/quality-pass/phase3-nrd-blocked.md`. Phase 4 needs either NVIDIA's debug symbols or a
+minimal standalone Vulkan+NGX repro project outside Minecraft/dxvk-remix, per
+`evidence/quality-pass/dlss-investigation.md`.
