@@ -1,0 +1,31 @@
+=== Phase 2: per-frame glFinish stall fix ===
+
+Hypothesis (a) from Phase 0 jstack evidence confirmed root cause: GlInterop.beforeRemixPresent()
+called glFinish() every frame because the runtime never waited on the clientDone semaphore
+before overwriting the shared interop color image -- it was exported/importable (FD handed to
+the mod) but dead on the runtime side (no addWaitSemaphore call anywhere referenced it).
+Documented as a known gap: KNOWN_GAPS.md 'Interop read/write ordering on Linux'.
+
+Fix: runtime now waits on clientDone before every blit into m_interopColorImage except the
+very first (nothing signalled yet on a fresh/resized image) -- see m_interopNeedsClientDoneWait
+in d3d9_swapchain_external.cpp/d3d9_swapchain.h. Mod's signalDone() now actually signals
+clientDone on the binary-semaphore (Linux) path instead of being a no-op; beforeRemixPresent()
+no longer calls glFinish(). Ordering is now enforced GPU-side via the semaphore wait instead of
+a CPU stall.
+
+Fixed view (0.5, 80.0, 0.5, facing south, day, clear weather), same Ultra preset (post Phase 1):
+  Before (Phase 1, glFinish still present): 58 fps, GPU sm util 71-75%, power ~137-146W
+  After  (Phase 2, clientDone wait):        92 fps, GPU sm util 99-100%, power ~188-189W
+
+That is +59% fps at the same preset, and the GPU is now the actual bottleneck (99-100% util)
+instead of the CPU stall -- matches the Phase 0 prediction exactly.
+
+jstack verification: 5 samples of the Render thread post-fix, 0/5 in glFinish (vs 3/5 pre-fix).
+Samples now land in normal Minecraft rendering work (chunk buffer lookups, entity rendering)
+and the native present call -- no CPU stall.
+
+No GL errors in remix-dxvk.log or latest.log after the fix. 5 screenshots taken while panning
+the camera show no tearing, flicker, or corruption (evidence/quality-pass/move_1..5 kept
+locally, phase2_fixed_screenshot.png committed).
+
+nvidia-smi dmon sample: see phase2_dmon.txt

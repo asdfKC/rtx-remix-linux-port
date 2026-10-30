@@ -1,0 +1,85 @@
+From bb792181ef68db2b819832a942b2fb77bb160622 Mon Sep 17 00:00:00 2001
+From: Kush J <kushisthecoolest@gmail.com>
+Date: Thu, 29 Oct 2026 22:02:33 -0500
+Subject: [PATCH] linux: runtime waits on clientDone before overwriting the
+ interop image
+
+The clientDone semaphore was created and exported to the client via
+dxvk_GetInteropInfo, but nothing on the runtime side ever waited on it --
+the mod worked around this with a per-frame glFinish() in
+beforeRemixPresent(), fully serializing CPU and GPU (documented in
+KNOWN_GAPS.md).
+
+D3D9SwapchainExternal::Present() now adds a wait on
+m_interopClientDoneSemaphore before each blit into m_interopColorImage,
+skipped only on the first blit of each image's lifetime (including after
+a resize) since nothing has signalled yet and a binary-semaphore wait
+with no prior signal queued would block the GPU timeline forever.
+Tracked with the new m_interopNeedsClientDoneWait flag, reset in
+ensureInteropColorImage().
+
+Verified on the RTX 5070 at the same fixed view/preset as before: 58fps
+at 71-75% GPU util -> 92fps at 99-100% GPU util (+59%), with the GPU now
+the actual bottleneck instead of the CPU stall. jstack of the Render
+thread: 0/5 samples in glFinish post-fix vs 3/5 pre-fix. No GL errors, no
+tearing across 5 screenshots taken while panning.
+
+Signed-off-by: Kush J <kushisthecoolest@gmail.com>
+---
+ src/d3d9/d3d9_swapchain.h            |  7 +++++++
+ src/d3d9/d3d9_swapchain_external.cpp | 11 +++++++++++
+ 2 files changed, 18 insertions(+)
+
+diff --git a/src/d3d9/d3d9_swapchain.h b/src/d3d9/d3d9_swapchain.h
+index 4669232f..e540f0bd 100644
+--- a/src/d3d9/d3d9_swapchain.h
++++ b/src/d3d9/d3d9_swapchain.h
+@@ -316,6 +316,13 @@ namespace dxvk {
+     Rc<RtxSemaphore> m_interopClientDoneSemaphore;
+     Rc<DxvkImage>     m_interopColorImage;
+     uint64_t          m_interopSemaphoreValue = 0;
++    // False only for the first blit into the current m_interopColorImage (and again right after a
++    // resize recreates it): that first blit has nothing to wait on, since the client can only
++    // signal clientDone after it has read an image the runtime already wrote. A binary-semaphore
++    // wait with no prior signal queued would block the GPU timeline forever. Every blit after the
++    // first sets this true and waits on clientDone before writing, so GL is guaranteed done
++    // sampling the previous frame's interop image -- this replaces the mod's per-frame glFinish().
++    bool              m_interopNeedsClientDoneWait = false;
+ 
+     void ensureInteropColorImage(uint32_t width, uint32_t height);
+     // NV-DXVK end
+diff --git a/src/d3d9/d3d9_swapchain_external.cpp b/src/d3d9/d3d9_swapchain_external.cpp
+index b8eaa56a..5204acf5 100644
+--- a/src/d3d9/d3d9_swapchain_external.cpp
++++ b/src/d3d9/d3d9_swapchain_external.cpp
+@@ -127,9 +127,16 @@ namespace dxvk {
+     if (g_interopImageEnabled && m_interopDxvkDoneSemaphore != nullptr) {
+       ensureInteropColorImage(imageInfo.extent.width, imageInfo.extent.height);
+       if (m_interopColorImage != nullptr) {
++        // Wait for the client to finish reading the previous frame out of this same image before
++        // overwriting it -- see m_interopNeedsClientDoneWait's comment. Skipped on the first blit
++        // of each image's lifetime, when nothing has signalled clientDone yet.
++        if (m_interopNeedsClientDoneWait) {
++          m_context->getCommandList()->addWaitSemaphore(m_interopClientDoneSemaphore->handle(), 1);
++        }
+         dxvk::RtxContext::blitImageHelper(m_context, targetImage, m_interopColorImage, VkFilter::VK_FILTER_NEAREST);
+         m_interopSemaphoreValue++;
+         m_context->getCommandList()->addSignalSemaphore(m_interopDxvkDoneSemaphore->handle(), 1);
++        m_interopNeedsClientDoneWait = true;
+       }
+     }
+ #endif
+@@ -169,6 +176,10 @@ namespace dxvk {
+       }
+     }
+ 
++    // A new image (including the very first one) has nothing pending for the client to signal
++    // clientDone about yet, so the next blit into it must not wait.
++    m_interopNeedsClientDoneWait = false;
++
+     if (width == 0 || height == 0) {
+       m_interopColorImage = nullptr;
+       return;
+-- 
+2.56.0
+

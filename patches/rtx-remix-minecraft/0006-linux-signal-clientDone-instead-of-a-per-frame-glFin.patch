@@ -1,0 +1,62 @@
+From dd915c085289408b0e0bbcc56355c36b0c38c112 Mon Sep 17 00:00:00 2001
+From: Kush J <kushisthecoolest@gmail.com>
+Date: Thu, 29 Oct 2026 22:02:42 -0500
+Subject: [PATCH] linux: signal clientDone instead of a per-frame glFinish
+
+The runtime now waits on clientDone before overwriting the interop image
+(dxvk-remix runtime patch), so GlInterop.signalDone() must actually
+signal it on the binary-semaphore (Linux) path instead of being a no-op,
+and beforeRemixPresent() no longer needs glFinish() to order GL against
+the runtime's next write -- the GPU-side semaphore wait does that now.
+
+Verified on the RTX 5070 paired with the runtime fix: 58fps/71-75% GPU
+-> 92fps/99-100% GPU at the same fixed view and preset.
+
+Signed-off-by: Kush J <kushisthecoolest@gmail.com>
+---
+ .../nvidia/rtxremix/minecraft/gl/GlInterop.java   | 15 ++++++++++-----
+ 1 file changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/src/main/java/com/nvidia/rtxremix/minecraft/gl/GlInterop.java b/src/main/java/com/nvidia/rtxremix/minecraft/gl/GlInterop.java
+index 0336061..4cf77a4 100644
+--- a/src/main/java/com/nvidia/rtxremix/minecraft/gl/GlInterop.java
++++ b/src/main/java/com/nvidia/rtxremix/minecraft/gl/GlInterop.java
+@@ -136,8 +136,13 @@ public final class GlInterop {
+     public void signalDone() {
+         clientDoneSemaphoreValue++;
+         if (!InteropHandles.USES_TIMELINE_SEMAPHORES) {
+-            // Linux: the runtime never waits on clientDone, and signalling a binary semaphore nobody waits on is
+-            // invalid after the first time, so it is left alone. beforeRemixPresent orders GL before the runtime.
++            // Linux: the runtime now waits on clientDone before it next overwrites the interop
++            // image (starting with its second write of each image's lifetime -- see
++            // m_interopNeedsClientDoneWait in d3d9_swapchain_external.cpp), so GL must signal it
++            // every frame once it is done sampling. This replaces the old per-frame glFinish() in
++            // beforeRemixPresent with a GPU-side wait instead of a CPU stall.
++            glSignalSemaphoreEXT(clientDoneSemaphore, NO_BUFFERS, barrierTextures, barrierLayouts);
++            checkGlError("glSignalSemaphoreEXT(clientDone)");
+             glFlush();
+             return;
+         }
+@@ -157,8 +162,9 @@ public final class GlInterop {
+ 
+     /**
+      * Linux, before Remix Present: consumes a dxvkDone signal no frame waited on, so the runtime never signals a
+-     * signalled binary semaphore, then finishes GL work. The runtime does not wait on clientDone before it writes the
+-     * interop image, so GL must be done sampling the previous frame from it first.
++     * signalled binary semaphore. Ordering against the runtime's next write of the interop image is now a GPU-side
++     * wait on clientDone (signalled in signalDone(), waited on by the runtime -- see
++     * m_interopNeedsClientDoneWait in d3d9_swapchain_external.cpp), so this no longer blocks the CPU with glFinish().
+      */
+     public void beforeRemixPresent() {
+         if (InteropHandles.USES_TIMELINE_SEMAPHORES) {
+@@ -166,7 +172,6 @@ public final class GlInterop {
+         }
+         drainStaleGlErrors();
+         consumeVkSignal();
+-        glFinish();
+     }
+ 
+     /** Linux, after Remix Present: the runtime has signalled dxvkDone if it has an interop image. */
+-- 
+2.56.0
+

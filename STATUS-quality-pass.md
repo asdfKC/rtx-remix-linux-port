@@ -50,14 +50,38 @@ GPU is still not saturated at Ultra — consistent with Phase 0's finding that t
 CPU-bound on `glFinish()`, not GPU-bound. Evidence: `evidence/quality-pass/phase1.txt`,
 `preset_high_screenshot.png`, `phase1_fixed_screenshot.png`.
 
-## Phase 2: per-frame stall (glFinish) — NOT STARTED
-Baseline evidence already points at hypothesis (a): the Render thread spends most of its time in
-`glFinish()` (`GlInterop.beforeRemixPresent`) and the native `RemixBridge.present` call. Next:
-replace `glFinish` with a real semaphore wait or ring-buffered interop image.
+## Phase 2: per-frame stall (glFinish) — DONE (verified on GPU, big win)
+
+Root cause confirmed by background research: the `clientDone` binary semaphore was created and
+exported to the mod via `dxvk_GetInteropInfo` (patch 0004/0010), but the runtime never waited on
+it anywhere — `GlInterop.beforeRemixPresent()` worked around this with a per-frame `glFinish()`
+(documented as a known gap in `KNOWN_GAPS.md`).
+
+Fix (option (i) from the task brief — runtime waits on clientDone, no ring buffer needed):
+- Runtime (`patches/dxvk-remix/0014-...patch`): `D3D9SwapchainExternal::Present()` now adds a
+  wait on `m_interopClientDoneSemaphore` before each blit into `m_interopColorImage`, skipped only
+  on the first blit of each image's lifetime (fresh image / after resize — nothing signalled yet,
+  and a binary-semaphore wait with no queued signal would block the GPU timeline forever). Tracked
+  with `m_interopNeedsClientDoneWait`, reset in `ensureInteropColorImage()`.
+- Mod (`patches/rtx-remix-minecraft/0006-...patch`): `GlInterop.signalDone()` now actually calls
+  `glSignalSemaphoreEXT` on `clientDoneSemaphore` on the binary path instead of being a no-op;
+  `beforeRemixPresent()` no longer calls `glFinish()`.
+
+Verified on GPU, fixed view (0.5, 80.0, 0.5, facing south, day, clear), same Ultra preset:
+- Before (Phase 1 state, glFinish still present): 58 fps, GPU sm util 71-75%, power ~137-146W
+- **After (Phase 2, clientDone wait)**: **92 fps, GPU sm util 99-100%, power ~188-189W**
+
+**+59% fps at the same preset.** The GPU is now the actual bottleneck (99-100% util), matching the
+Phase 0 prediction. jstack of the Render thread: 0/5 samples in `glFinish` post-fix vs 3/5
+pre-fix — confirmed via 5 fresh samples. No GL errors in either log; 5 screenshots taken while
+panning the camera show no tearing or corruption.
+
+Evidence: `evidence/quality-pass/phase2.txt`, `phase2_fixed_screenshot.png`, `phase2_dmon.txt`.
 
 ## Phase 3: NRD denoiser — NOT STARTED
 
 ## Phase 4: DLSS investigation — NOT STARTED
 
 ## Next step
-Phase 2 (per-frame glFinish stall) — highest value remaining, per the Phase 0 jstack evidence.
+Phase 3 (NRD denoiser) — the grain is still present (not addressed by Phases 1-2); next highest
+value. Phase 4 (DLSS) is time-boxed and only attempted if budget remains after Phase 3.
