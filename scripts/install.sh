@@ -207,6 +207,22 @@ set_cfg AutomaticJava false
 set_cfg OverrideCommands false
 set_cfg WrapperCommand ""
 
+# Clouds off by default (mitigation, not a fix): the mod submits clouds as real opaque+subsurface
+# geometry (CloudRenderer.java), which this runtime's path tracer treats as a near-total direct-light
+# occluder -- clouds visibly block the sun and render as a dark brownish blob instead of a bright white
+# puff when backlit (see evidence/look-and-run/job2-clouds-sun-blocker.md). Shared Remix material/shader
+# code, not a Linux-specific bug, so not fixed here; only set if options.txt doesn't already have an
+# explicit value, so a user's own choice (including turning clouds back on) is never overwritten.
+OPTIONS_TXT="$INSTANCE/.minecraft/options.txt"
+if [ -f "$OPTIONS_TXT" ]; then
+  if ! grep -q '^renderClouds:' "$OPTIONS_TXT"; then
+    echo 'renderClouds:"false"' >> "$OPTIONS_TXT"
+  fi
+else
+  mkdir -p "$(dirname "$OPTIONS_TXT")"
+  printf 'renderClouds:"false"\n' > "$OPTIONS_TXT"
+fi
+
 # --- 6. launch script -------------------------------------------------------
 game_env=()
 # The runtime's NVIDIA driver minimum is not Linux-aware yet (KNOWN_GAPS.md).
