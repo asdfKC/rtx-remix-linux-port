@@ -45,11 +45,12 @@ if [ ! -x slang/build/Release/bin/slangc ]; then
   ninja -C slang/build -j"$JOBS" slangc slang-glslang
 fi
 
-# --- NRD headers and shaders (v4.13.0) --------------------------------------
+# --- NRD headers, shaders, and denoiser library (v4.13.0) -------------------
 if [ ! -d NRD ]; then
-  log "NRD $NRD_COMMIT"
+  log "NRD $NRD_COMMIT (+ patches/nrd)"
   git clone --filter=blob:none --no-checkout https://github.com/NVIDIA-RTX/NRD NRD
-  git -C NRD checkout -q "$NRD_COMMIT"
+  git -C NRD checkout -q -b linux-port "$NRD_COMMIT"
+  git -C NRD -c user.name=build -c user.email=build@localhost am -q "$PORT_DIR"/patches/nrd/*.patch
 fi
 
 # --- dxvk-remix -------------------------------------------------------------
@@ -66,6 +67,20 @@ mkdir -p "$R/external/nrd" "$R/external/fonts/NVIDIASans" "$R/external/fonts/Rob
 ln -sfn "$WORK/slang/build/Release/bin" "$R/external/slang"
 ln -sfn "$WORK/NRD/Include" "$R/external/nrd/Include"
 ln -sfn "$WORK/NRD/Shaders" "$R/external/nrd/Shaders"
+
+# --- NRD denoiser shared library --------------------------------------------
+# Built from the same checkout the headers above come from, so there is no
+# version drift between libNRD.so and what dxvk-remix compiles against.
+# Requires: sudo pacman -S directx-shader-compiler (provides dxc for SPIR-V shader output).
+if command -v dxc >/dev/null 2>&1 && [ ! -f NRD/build/libNRD.so ]; then
+  log "NRD $NRD_COMMIT (libNRD.so)"
+  cmake -S NRD -B NRD/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DNRD_STATIC_LIBRARY=OFF -DNRD_DISABLE_SHADER_COMPILATION=OFF \
+    -DNRD_EMBEDS_SPIRV_SHADERS=ON -DDXC_SPIRV_PATH="$(command -v dxc)"
+  cmake --build NRD/build --parallel "$JOBS"
+elif [ ! -f NRD/build/libNRD.so ]; then
+  log "dxc not found; skipping libNRD.so (NRD denoiser disabled). sudo pacman -S directx-shader-compiler"
+fi
 
 if [ "$REMIX_FONTS" = packman ]; then
   log "fonts via Packman (rtx-remix-fonts@2)"

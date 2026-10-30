@@ -1,0 +1,69 @@
+From ea73ddc238bd65f9e5c9b33885679ffb5f2c878a Mon Sep 17 00:00:00 2001
+From: build <build@localhost>
+Date: Fri, 30 Oct 2026 06:29:45 -0500
+Subject: [PATCH] linux: stage libNRD.so automatically from NRD/build (NRD
+ denoiser)
+
+---
+ build.gradle | 21 +++++++++++++++++++--
+ 1 file changed, 19 insertions(+), 2 deletions(-)
+
+diff --git a/build.gradle b/build.gradle
+index 63bce80..a1d2a90 100644
+--- a/build.gradle
++++ b/build.gradle
+@@ -332,11 +332,15 @@ fetchRuntimeSdkTasks['linux64'] = tasks.register('fetchRuntimeSdkLinux64') {
+ // every time it runs. The DLSS feature libraries are staged only on request
+ // (-PlinuxDlss=true or -PlinuxDlssDir=<dir>): NGX is off by default in the Linux
+ // runtime (REMIX_LINUX_ENABLE_NGX=1 enables it), so they are not shipped otherwise.
++// libNRD.so (the NRD denoiser) is staged automatically when found next to the
++// runtime, at <work>/NRD/build/libNRD.so (scripts/build-runtime.sh's layout), or
++// at -PlinuxNrd=<path to libNRD.so or its dir>.
+ def linuxRuntimeProperty = providers.gradleProperty('linuxRuntime')
+ def linuxDlssDirProperty = providers.gradleProperty('linuxDlssDir')
+ def linuxDlssProperty = providers.gradleProperty('linuxDlss')
++def linuxNrdProperty = providers.gradleProperty('linuxNrd')
+ tasks.register('stageLinuxRuntime') {
+-    description = 'Stages a local Linux runtime: -PlinuxRuntime=<libremix.so or its dir> [-PlinuxDlss=true] [-PlinuxDlssDir=<dir>]'
++    description = 'Stages a local Linux runtime: -PlinuxRuntime=<libremix.so or its dir> [-PlinuxDlss=true] [-PlinuxDlssDir=<dir>] [-PlinuxNrd=<libNRD.so or its dir>]'
+     group = 'build setup'
+     def targetDir = file('remix-runtime/linux64')
+     doLast {
+@@ -349,10 +353,14 @@ tasks.register('stageLinuxRuntime') {
+             throw new GradleException("libremix.so not found at ${runtime}")
+         }
+         // A build directory layout from scripts/build-runtime.sh: <work>/build/src/d3d9/libremix.so
+-        // beside <work>/dxvk-remix/submodules/dlss/lib/Linux_x86_64/rel.
++        // beside <work>/dxvk-remix/submodules/dlss/lib/Linux_x86_64/rel and <work>/NRD/build.
+         def dlssDir = linuxDlssDirProperty.isPresent()
+                 ? new File(linuxDlssDirProperty.get())
+                 : new File(runtime.parentFile, '../../../dxvk-remix/submodules/dlss/lib/Linux_x86_64/rel').canonicalFile
++        def nrdPath = linuxNrdProperty.isPresent()
++                ? new File(linuxNrdProperty.get())
++                : new File(runtime.parentFile, '../../../NRD/build/libNRD.so').canonicalFile
++        if (nrdPath.directory) nrdPath = new File(nrdPath, 'libNRD.so')
+         def targetPath = targetDir.toPath()
+         if (java.nio.file.Files.isSymbolicLink(targetPath)) {
+             throw new GradleException("${targetDir} is a link; remove it before staging a local runtime")
+@@ -376,9 +384,18 @@ tasks.register('stageLinuxRuntime') {
+             logger.warn("No DLSS libraries found in ${dlssDir}; DLSS stays unavailable.")
+         }
+         dlssLibraries.each { copyIn(it) }
++        def stagedNrd = nrdPath.file
++        if (stagedNrd) {
++            copyIn(nrdPath)
++        } else if (linuxNrdProperty.isPresent()) {
++            throw new GradleException("libNRD.so not found at ${nrdPath}")
++        } else {
++            logger.lifecycle("No libNRD.so found at ${nrdPath}; NRD denoiser stays unavailable.")
++        }
+         new File(targetDir, '.local-sdk-source').text =
+                 "source: ${runtime.canonicalPath}\n" +
+                 "dlss: ${dlssLibraries.isEmpty() ? '(none)' : dlssDir.canonicalPath}\n" +
++                "nrd: ${stagedNrd ? nrdPath.canonicalPath : '(none)'}\n" +
+                 "staged_at_utc: ${java.time.Instant.now()}\n"
+     }
+ }
+-- 
+2.56.0
+

@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: build <build@localhost>
+Date: Fri, 30 Oct 2026 06:27:05 -0500
+Subject: [PATCH] linux: pin ShaderMake/MathLib FetchContent deps instead of
+ floating main (main has diverged and breaks the build: ShaderMake dropped
+ --useAPI, MathLib float4x4 API changed)
+
+---
+ CMakeLists.txt | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 4a4918a..c59d2fc 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -111,8 +111,7 @@ if(NOT TARGET ShaderMake AND NOT NRD_DISABLE_SHADER_COMPILATION)
+     FetchContent_Declare(
+         shadermake
+         GIT_REPOSITORY https://github.com/NVIDIA-RTX/ShaderMake.git
+-        GIT_TAG main
+-        GIT_SHALLOW 1
++        GIT_TAG 809711a
+     )
+     list(APPEND DEPS shadermake)
+ endif()
+@@ -122,8 +121,7 @@ if(NOT TARGET MathLib)
+     FetchContent_Declare(
+         mathlib
+         GIT_REPOSITORY https://github.com/NVIDIA-RTX/MathLib.git
+-        GIT_TAG main
+-        GIT_SHALLOW 1
++        GIT_TAG ce3142d
+     )
+     list(APPEND DEPS mathlib)
+ endif()
