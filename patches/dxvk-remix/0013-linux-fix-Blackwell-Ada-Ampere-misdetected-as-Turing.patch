@@ -1,0 +1,125 @@
+From 9568c3143d0ff6290b08587af4a148489084c141 Mon Sep 17 00:00:00 2001
+From: Kush J <kushisthecoolest@gmail.com>
+Date: Thu, 29 Oct 2026 21:54:35 -0500
+Subject: [PATCH] linux: fix Blackwell/Ada/Ampere misdetected as Turing in GPU
+ profile
+
+NvAPI is unavailable on Linux so queryNvidiaArchInfo() always fails and
+getNvidiaArch()/getNvidiaChipId() fell back to a hardcoded Turing default,
+forcing Low graphics settings on every non-Turing GPU including this
+port's RTX 5070 (Blackwell, GB205, PCI deviceID 0x2f04).
+
+Add a Vulkan-deviceID-range fallback table (Turing/Ampere/Ada/Blackwell)
+consulted only when NVAPI init fails, fed from the VkPhysicalDeviceProperties
+already available at the updateGraphicsPresets() call site. Verified on the
+RTX 5070: log now reads "NVAPI unavailable; using Vulkan deviceID 0x2f04 to
+guess GPU architecture" -> "NVIDIA Blackwell architecture detected, setting
+default graphics settings to Ultra" instead of Turing/Low.
+
+Signed-off-by: Kush J <kushisthecoolest@gmail.com>
+---
+ src/dxvk/rtx_render/rtx_options.cpp | 46 ++++++++++++++++++++++++++---
+ src/dxvk/rtx_render/rtx_options.h   |  7 +++--
+ 2 files changed, 47 insertions(+), 6 deletions(-)
+
+diff --git a/src/dxvk/rtx_render/rtx_options.cpp b/src/dxvk/rtx_render/rtx_options.cpp
+index d5a8cf36..02dd3737 100644
+--- a/src/dxvk/rtx_render/rtx_options.cpp
++++ b/src/dxvk/rtx_render/rtx_options.cpp
+@@ -277,6 +277,36 @@ namespace dxvk {
+     }
+   }
+ 
++  // Linux has no NVAPI, so queryNvidiaArchInfo() always fails there and the caller used to fall
++  // back to a hardcoded Turing default -- misdetecting every Ampere/Ada/Blackwell GPU (including
++  // this port's RTX 5070, PCI deviceID 0x2F04) as Turing and forcing Low settings. This table is
++  // a best-effort fallback keyed off the Vulkan-reported PCI deviceID, built from publicly known
++  // deviceID ranges per generation. It is only consulted when NVAPI is unavailable.
++  static bool architectureFromVulkanDeviceId(uint32_t deviceId, NV_GPU_ARCH_INFO& archInfo) {
++    struct Range { uint32_t lo, hi; NV_GPU_ARCHITECTURE_ID arch; NV_GPU_ARCH_IMPLEMENTATION_ID impl; };
++    static constexpr Range kRanges[] = {
++      // Turing (TU10x/TU11x, GTX 16-series and RTX 20-series).
++      { 0x1E00, 0x1FFF, NV_GPU_ARCHITECTURE_TU100, NV_GPU_ARCH_IMPLEMENTATION_TU102 },
++      { 0x2180, 0x21FF, NV_GPU_ARCHITECTURE_TU100, NV_GPU_ARCH_IMPLEMENTATION_TU116 },
++      // Ampere (GA10x, RTX 30-series).
++      { 0x2200, 0x25FF, NV_GPU_ARCHITECTURE_GA100, NV_GPU_ARCH_IMPLEMENTATION_GA102 },
++      // Ada Lovelace (AD10x, RTX 40-series).
++      { 0x2600, 0x28FF, NV_GPU_ARCHITECTURE_AD100, NV_GPU_ARCH_IMPLEMENTATION_AD102 },
++      // Blackwell (GB10x/GB20x, RTX 50-series). Confirmed against this machine's RTX 5070
++      // (GB205, deviceID 0x2F04).
++      { 0x2B00, 0x2FFF, NV_GPU_ARCHITECTURE_GB200, NV_GPU_ARCH_IMPLEMENTATION_GB202 },
++    };
++    for (const Range& r : kRanges) {
++      if (deviceId >= r.lo && deviceId <= r.hi) {
++        archInfo.version = NV_GPU_ARCH_INFO_VER;
++        archInfo.architecture_id = r.arch;
++        archInfo.implementation_id = r.impl;
++        return true;
++      }
++    }
++    return false;
++  }
++
+   static bool queryNvidiaArchInfo(NV_GPU_ARCH_INFO& archInfo) {
+     NvAPI_Status status;
+     status = NvAPI_Initialize();
+@@ -300,18 +330,26 @@ namespace dxvk {
+     return status == NVAPI_OK;
+   }
+ 
+-  NV_GPU_ARCHITECTURE_ID RtxOptions::getNvidiaArch() {
++  NV_GPU_ARCHITECTURE_ID RtxOptions::getNvidiaArch(uint32_t vulkanDeviceId) {
+     NV_GPU_ARCH_INFO archInfo;
+     if (queryNvidiaArchInfo(archInfo) == false) {
++      if (vulkanDeviceId != 0 && architectureFromVulkanDeviceId(vulkanDeviceId, archInfo)) {
++        Logger::info(str::format("NVAPI unavailable; using Vulkan deviceID 0x", std::hex, vulkanDeviceId,
++                                 " to guess GPU architecture."));
++        return archInfo.architecture_id;
++      }
+       return NV_GPU_ARCHITECTURE_TU100;
+     }
+-    
++
+     return archInfo.architecture_id;
+   }
+ 
+-  NV_GPU_ARCH_IMPLEMENTATION_ID RtxOptions::getNvidiaChipId() {
++  NV_GPU_ARCH_IMPLEMENTATION_ID RtxOptions::getNvidiaChipId(uint32_t vulkanDeviceId) {
+     NV_GPU_ARCH_INFO archInfo;
+     if (queryNvidiaArchInfo(archInfo) == false) {
++      if (vulkanDeviceId != 0 && architectureFromVulkanDeviceId(vulkanDeviceId, archInfo)) {
++        return archInfo.implementation_id;
++      }
+       return NV_GPU_ARCH_IMPLEMENTATION_TU100;
+     }
+     
+@@ -440,7 +478,7 @@ namespace dxvk {
+       // The NVAPI architecture query only runs when the discrete-GPU heuristics use it.
+       const bool isRtxSpark = GpuProfile::isRtxSpark();
+       const bool needsArch = !hasMatchingOverride && !isRtxSpark && vendorID == static_cast<uint32_t>(DxvkGpuVendor::Nvidia);
+-      const uint32_t archId = needsArch ? static_cast<uint32_t>(getNvidiaArch()) : 0;
++      const uint32_t archId = needsArch ? static_cast<uint32_t>(getNvidiaArch(deviceProperties.deviceID)) : 0;
+       const AutoPresetDecision decision = selectAutoPreset(GpuProfile::getHardwareInfo(), overridePreset, archId);
+       for (const std::string& line : decision.log) {
+         Logger::info(line);
+diff --git a/src/dxvk/rtx_render/rtx_options.h b/src/dxvk/rtx_render/rtx_options.h
+index 86846d83..0eda0118 100644
+--- a/src/dxvk/rtx_render/rtx_options.h
++++ b/src/dxvk/rtx_render/rtx_options.h
+@@ -1411,8 +1411,11 @@ namespace dxvk {
+     static void updateUpscalerFromTaauPreset();
+     static void updateUpscalerFromXeSSPreset();
+     static void updatePresetFromUpscaler();
+-    static NV_GPU_ARCHITECTURE_ID getNvidiaArch();
+-    static NV_GPU_ARCH_IMPLEMENTATION_ID getNvidiaChipId();
++    // vulkanDeviceId: VkPhysicalDeviceProperties::deviceID of the active adapter, used as a
++    // PCI-ID-range fallback when NVAPI is unavailable (e.g. on Linux, where NvAPI_Initialize()
++    // always fails). Pass 0 to skip the fallback and keep the old Turing-default behavior.
++    static NV_GPU_ARCHITECTURE_ID getNvidiaArch(uint32_t vulkanDeviceId = 0);
++    static NV_GPU_ARCH_IMPLEMENTATION_ID getNvidiaChipId(uint32_t vulkanDeviceId = 0);
+     static void updateGraphicsPresets(DxvkDevice* device);
+     static void updateLightingSetting();
+     static void updatePathTracerPreset(PathTracerPreset preset);
+-- 
+2.56.0
+

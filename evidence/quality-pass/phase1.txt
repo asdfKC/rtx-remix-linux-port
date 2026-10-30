@@ -1,0 +1,39 @@
+=== Phase 1: graphics preset / Blackwell detection ===
+
+Step 1: env-var comparison (no code change)
+  Baseline (auto, misdetected Turing/Low):  77 fps, GPU sm util ~56-70%
+  DXVK_GRAPHICS_PRESET_TYPE=1 (High forced): 65 fps, GPU sm util ~52%
+  Confirmed via /proc/<pid>/environ that the var reaches the game process.
+  Confirmed via remix-dxvk.log: 'rtx.graphicsPreset = 1 (from DXVK_GRAPHICS_PRESET_TYPE)'
+
+Step 2: runtime fix (patch 0013)
+  Root cause: RtxOptions::getNvidiaArch() hardcoded NV_GPU_ARCHITECTURE_TU100 whenever
+  NvAPI_Initialize() fails, which it always does on Linux (no NvAPI). Fix adds a Vulkan
+  deviceID-range fallback table consulted only when NVAPI is unavailable.
+
+  Before (baseline, Phase 0): 'NVIDIA Turing architecture detected, setting default
+  graphics settings to Low'
+
+  After (this machine, RTX 5070 / GB205 / PCI deviceID 0x2f04):
+    [21:53:17.359] info:  NVAPI unavailable; using Vulkan deviceID 0x2f04 to guess GPU architecture.
+    [21:53:17.359] info:  NVIDIA Blackwell architecture detected, setting default graphics settings to Ultra
+
+  Fixed-view measurement at auto-selected Ultra preset (same coords 0.5 80.0 0.5, facing
+  south, day, clear weather):
+    58 fps, GPU sm util ~71-75% (nvidia-smi dmon), power ~137-146W
+
+  Comparison table (same fixed view):
+    Low   (pre-fix, misdetected Turing):  77 fps, GPU 56-70%
+    High  (forced via env var):           65 fps, GPU 52%
+    Ultra (post-fix, correct Blackwell):  58 fps, GPU 71-75%
+
+  This is a quality/fps tradeoff, not a bug: Ultra does more ray-traced work per frame,
+  which is why GPU utilization rose from ~56-70% to ~71-75% while fps dropped. The GPU is
+  still not saturated at Ultra, consistent with the Phase 0 finding that the Render thread
+  is CPU-bound on glFinish(), not GPU-bound -- Phase 2 should recover headroom here.
+
+  No change to selectAutoPreset()'s existing Ada->High / Blackwell->Ultra tier mapping;
+  only the broken architecture *input* to that logic was fixed. (Task brief suggested
+  defaulting RTX 40/50 to High pending benchmarks: measured fps/GPU numbers above show
+  Ultra renders correctly and the GPU has headroom, so the existing Ultra default for
+  Blackwell was left as-is rather than overridden.)
